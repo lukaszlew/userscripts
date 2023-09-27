@@ -3,7 +3,7 @@
 // @version      0.1
 // @description  Hides or shows variation stones marked with numbers. Useful for practicing sequence visualization.
 // @author       Lukasz Lew
-// @match        https://*.ai-sensei.com/game/*
+// @match        https://*.ai-sensei.com/*
 // @grant        none
 // ==/UserScript==
 
