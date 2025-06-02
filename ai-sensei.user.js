@@ -11,8 +11,9 @@ let currentMove = 0;
 let maxMoves = 0;
 let animationInterval = null;
 let animationSpeed = 1000; // milliseconds between moves
-let stonesVisible = true;
-let showPrefix = false; // true = show moves 1 to current, false = show only current move
+let stonesVisible = false; // start disabled
+let showPrefix = false; // start disabled 
+let animateMode = false; // true = animate, false = immediate
 let lastBoardState = null;
 
 function hideVarStones(hide) {
@@ -183,26 +184,62 @@ function initializeMoves() {
 }
 
 function nextMove() {
-    console.log('=== nextMove clicked ===', 'currentMove:', currentMove, 'maxMoves:', maxMoves)
+    console.log('=== nextMove clicked ===', 'currentMove:', currentMove, 'maxMoves:', maxMoves, 'animateMode:', animateMode)
     if (maxMoves === 0) initializeMoves()
-    if (currentMove < maxMoves) {
-        currentMove++
-        console.log('Moving to:', currentMove)
-        showOnlyMove(currentMove)
+    
+    if (animateMode) {
+        startAnimation()
     } else {
-        console.log('Already at max move')
+        if (currentMove < maxMoves) {
+            currentMove++
+            console.log('Moving to:', currentMove)
+            if (stonesVisible || showPrefix) {
+                showOnlyMove(currentMove)
+            }
+        } else {
+            console.log('Already at max move')
+        }
     }
 }
 
 function prevMove() {
-    console.log('=== prevMove clicked ===', 'currentMove:', currentMove, 'maxMoves:', maxMoves)
+    console.log('=== prevMove clicked ===', 'currentMove:', currentMove, 'maxMoves:', maxMoves, 'animateMode:', animateMode)
     if (maxMoves === 0) initializeMoves()
-    if (currentMove > 0) {
-        currentMove--
-        console.log('Moving to:', currentMove)
-        showOnlyMove(currentMove)
+    
+    if (animateMode) {
+        animateBackward()
     } else {
-        console.log('Already at move 0')
+        if (currentMove > 0) {
+            currentMove--
+            console.log('Moving to:', currentMove)
+            if (stonesVisible || showPrefix) {
+                showOnlyMove(currentMove)
+            }
+        } else {
+            console.log('Already at move 0')
+        }
+    }
+}
+
+function move5Forward() {
+    if (animateMode) {
+        startAnimation(Math.min(currentMove + 5, maxMoves))
+    } else {
+        currentMove = Math.min(currentMove + 5, maxMoves)
+        if (stonesVisible || showPrefix) {
+            showOnlyMove(currentMove)
+        }
+    }
+}
+
+function move5Backward() {
+    if (animateMode) {
+        animateBackward(5)
+    } else {
+        currentMove = Math.max(currentMove - 5, 0)
+        if (stonesVisible || showPrefix) {
+            showOnlyMove(currentMove)
+        }
     }
 }
 
@@ -226,14 +263,26 @@ function goToBeginning() {
     showOnlyMove(0) // Hide all moves
 }
 
+function updateButtonStyle(button, isPressed) {
+    if (isPressed) {
+        button.classList.add('btn-success')
+        button.classList.remove('btn-primary')
+        button.style.boxShadow = 'inset 0 3px 5px rgba(0,0,0,0.3)'
+    } else {
+        button.classList.add('btn-primary')
+        button.classList.remove('btn-success')
+        button.style.boxShadow = ''
+    }
+}
+
 function toggleStones() {
     stonesVisible = !stonesVisible
     console.log('=== toggleStones ===', stonesVisible)
     
-    // Update button icon
+    // Update button style
     let toggleButton = document.querySelector('button[title="Toggle stones visibility"]')
     if (toggleButton) {
-        toggleButton.querySelector('span').textContent = stonesVisible ? '⚫' : '🔢'
+        updateButtonStyle(toggleButton, stonesVisible)
     }
     
     // Show/hide ALL stones immediately, regardless of current move
@@ -273,7 +322,7 @@ function toggleStones() {
     }
     
     // If currently showing a move, refresh the display
-    if (currentMove > 0) {
+    if (currentMove > 0 && (stonesVisible || showPrefix)) {
         showOnlyMove(currentMove)
     }
 }
@@ -282,15 +331,26 @@ function togglePrefix() {
     showPrefix = !showPrefix
     console.log('=== togglePrefix ===', showPrefix)
     
-    // Update button icon
+    // Update button style
     let prefixButton = document.querySelector('button[title="Toggle prefix mode"]')
     if (prefixButton) {
-        prefixButton.querySelector('span').textContent = showPrefix ? '🔢' : '1️⃣'
+        updateButtonStyle(prefixButton, showPrefix)
     }
     
     // If currently showing a move, refresh the display
-    if (currentMove > 0) {
+    if (currentMove > 0 && (stonesVisible || showPrefix)) {
         showOnlyMove(currentMove)
+    }
+}
+
+function toggleAnimate() {
+    animateMode = !animateMode
+    console.log('=== toggleAnimate ===', animateMode)
+    
+    // Update button style
+    let animateButton = document.querySelector('button[title="Toggle animation mode"]')
+    if (animateButton) {
+        updateButtonStyle(animateButton, animateMode)
     }
 }
 
@@ -400,7 +460,11 @@ function onBoardChange() {
     if (maxMoves > 0) {
         currentMove = maxMoves
         console.log('Starting at end of variation, move:', currentMove)
-        showOnlyMove(currentMove)
+        
+        // Only apply modifications if either toggle is enabled
+        if (stonesVisible || showPrefix) {
+            showOnlyMove(currentMove)
+        }
     }
     
     lastBoardState = getBoardState()
@@ -472,97 +536,88 @@ function installButtons(n=0) {
         return b
     }
 
-    // Toggle stones visibility
-    let toggleButton = button('⚫', () => toggleStones())
-    toggleButton.title = 'Toggle stones visibility'
+    // Create container for first row
+    let firstRow = document.createElement('div')
+    firstRow.className = 'd-flex flex-wrap align-items-center mb-2'
     
-    let ms1 = document.createElement('span')
-    ms1.className = 'ms-1'
+    // Toggle buttons - keep same icon always
+    let toggleStonesButton = button('⚫', () => toggleStones())
+    toggleStonesButton.title = 'Toggle stones visibility'
+    updateButtonStyle(toggleStonesButton, stonesVisible)
     
-    // Toggle prefix mode
-    let prefixButton = button('1️⃣', () => togglePrefix())
+    let prefixButton = button('🔢', () => togglePrefix())
     prefixButton.title = 'Toggle prefix mode'
+    updateButtonStyle(prefixButton, showPrefix)
     
-    let ms2 = document.createElement('span')
-    ms2.className = 'ms-1'
+    let animateToggleButton = button('⚡', () => toggleAnimate())
+    animateToggleButton.title = 'Toggle animation mode'
+    updateButtonStyle(animateToggleButton, animateMode)
     
-    // Navigation buttons with arrows
-    let prevButton = button('◀', () => prevMove())
-    prevButton.title = 'Previous move'
+    // Add toggle buttons to first row
+    firstRow.appendChild(toggleStonesButton)
+    firstRow.appendChild(document.createElement('span')).className = 'ms-1'
+    firstRow.appendChild(prefixButton)
+    firstRow.appendChild(document.createElement('span')).className = 'ms-1'
+    firstRow.appendChild(animateToggleButton)
     
-    let ms3 = document.createElement('span')
-    ms3.className = 'ms-1'
+    // Create container for second row - navigation
+    let secondRow = document.createElement('div')
+    secondRow.className = 'd-flex flex-wrap align-items-center mb-2'
     
-    let nextButton = button('▶', () => nextMove())
-    nextButton.title = 'Next move'
-    
-    let ms4 = document.createElement('span')
-    ms4.className = 'ms-1'
-    
-    // Animation controls
-    let animateButton = button('⏯️', () => startAnimation())
-    animateButton.title = 'Animate all moves'
-    
-    let ms5 = document.createElement('span')
-    ms5.className = 'ms-1'
-    
-    let animate5Button = button('5️⃣', () => startAnimation(5))
-    animate5Button.title = 'Animate first 5 moves'
-    
-    let ms6 = document.createElement('span')
-    ms6.className = 'ms-1'
-    
-    let animateBack5Button = button('➖5️⃣', () => animateBackward(5))
-    animateBack5Button.title = 'Animate backward 5 moves'
-    
-    let ms7 = document.createElement('span')
-    ms7.className = 'ms-1'
-    
-    let beginningButton = button('⏮️', () => goToBeginning())
+    // Navigation buttons with consistent icons
+    let beginningButton = button('⏮', () => goToBeginning())
     beginningButton.title = 'Go to beginning'
     
-    let ms8 = document.createElement('span')
-    ms8.className = 'ms-1'
+    let back5Button = button('⏪', () => move5Backward())
+    back5Button.title = 'Move/animate 5 backward'
     
-    // Speed controls with speed display in between
+    let prevButton = button('⏴', () => prevMove())
+    prevButton.title = 'Previous move/animate all'
+    
+    let nextButton = button('⏵', () => nextMove())
+    nextButton.title = 'Next move/animate all'
+    
+    let forward5Button = button('⏩', () => move5Forward())
+    forward5Button.title = 'Move/animate 5 forward'
+    
+    // Add navigation buttons to second row
+    secondRow.appendChild(beginningButton)
+    secondRow.appendChild(document.createElement('span')).className = 'ms-1'
+    secondRow.appendChild(back5Button)
+    secondRow.appendChild(document.createElement('span')).className = 'ms-1'
+    secondRow.appendChild(prevButton)
+    secondRow.appendChild(document.createElement('span')).className = 'ms-1'
+    secondRow.appendChild(nextButton)
+    secondRow.appendChild(document.createElement('span')).className = 'ms-1'
+    secondRow.appendChild(forward5Button)
+    
+    // Create container for third row - speed controls
+    let thirdRow = document.createElement('div')
+    thirdRow.className = 'd-flex flex-wrap align-items-center'
+    
     let slowerButton = button('🐌', () => changeSpeed(1.5))
     slowerButton.title = 'Slower animation'
-    
-    let ms9 = document.createElement('span')
-    ms9.className = 'ms-1'
     
     // Speed display
     let speedDisplay = document.createElement('span')
     speedDisplay.id = 'speed-display'
-    speedDisplay.className = 'badge bg-secondary mx-1'
+    speedDisplay.className = 'badge bg-secondary mx-2'
     speedDisplay.textContent = `${(animationSpeed/1000).toFixed(1)}s`
     speedDisplay.title = 'Animation speed'
     
-    let fasterButton = button('🐇', () => changeSpeed(0.67))
+    let fasterButton = button('🐰', () => changeSpeed(0.67))
     fasterButton.title = 'Faster animation'
+    
+    // Add speed controls to third row
+    thirdRow.appendChild(slowerButton)
+    thirdRow.appendChild(speedDisplay)
+    thirdRow.appendChild(fasterButton)
 
     let top = document.getElementsByClassName('game-sidebar')[0].parentElement
     const fc = top.firstChild
-    top.insertBefore(toggleButton, fc)
-    top.insertBefore(ms1, fc)
-    top.insertBefore(prefixButton, fc)
-    top.insertBefore(ms2, fc)
-    top.insertBefore(prevButton, fc)
-    top.insertBefore(ms3, fc)
-    top.insertBefore(nextButton, fc)
-    top.insertBefore(ms4, fc)
-    top.insertBefore(animateButton, fc)
-    top.insertBefore(ms5, fc)
-    top.insertBefore(animate5Button, fc)
-    top.insertBefore(ms6, fc)
-    top.insertBefore(animateBack5Button, fc)
-    top.insertBefore(ms7, fc)
-    top.insertBefore(beginningButton, fc)
-    top.insertBefore(ms8, fc)
-    top.insertBefore(slowerButton, fc)
-    top.insertBefore(ms9, fc)
-    top.insertBefore(speedDisplay, fc)
-    top.insertBefore(fasterButton, fc)
+    top.insertBefore(firstRow, fc)
+    top.insertBefore(secondRow, fc)
+    top.insertBefore(thirdRow, fc)
 }
 
 (function() {
@@ -580,6 +635,9 @@ function installButtons(n=0) {
     window.goToBeginning = goToBeginning
     window.togglePrefix = togglePrefix
     window.animateBackward = animateBackward
+    window.toggleAnimate = toggleAnimate
+    window.move5Forward = move5Forward
+    window.move5Backward = move5Backward
     window.addEventListener('load', () => {
         installButtons(0)
         setTimeout(startBoardMonitoring, 1000) // Start monitoring after page loads
