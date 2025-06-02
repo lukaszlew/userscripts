@@ -116,20 +116,18 @@ function showOnlyMove(moveNum) {
                 label.style.display = 'none'
             }
             
-            // Show/hide stones if stones are visible
-            if (stonesVisible) {
-                let rowS = parts[1]
-                let colS = parts[2]
-                let stoneClass = 'stone-' + rowS + '-' + colS
-                let stones = board.getElementsByClassName(stoneClass)
-                
-                if (stones.length > 0) {
-                    let [stone] = stones
-                    if (shouldShow) {
-                        stone.style.display = ''
-                    } else {
-                        stone.style.display = 'none'
-                    }
+            // Always handle stones regardless of stonesVisible setting
+            let rowS = parts[1]
+            let colS = parts[2]
+            let stoneClass = 'stone-' + rowS + '-' + colS
+            let stones = board.getElementsByClassName(stoneClass)
+            
+            if (stones.length > 0) {
+                let [stone] = stones
+                if (shouldShow && stonesVisible) {
+                    stone.style.display = ''
+                } else {
+                    stone.style.display = 'none'
                 }
             }
             
@@ -221,22 +219,36 @@ function prevMove() {
     }
 }
 
-function move5Forward() {
+function move6Forward() {
     if (animateMode) {
-        startAnimation(Math.min(currentMove + 5, maxMoves))
+        startAnimation(Math.min(currentMove + 6, maxMoves))
     } else {
-        currentMove = Math.min(currentMove + 5, maxMoves)
+        currentMove = Math.min(currentMove + 6, maxMoves)
         if (stonesVisible || showPrefix) {
             showOnlyMove(currentMove)
         }
     }
 }
 
-function move5Backward() {
+function move6Backward() {
     if (animateMode) {
-        animateBackward(5)
+        animateBackward(6)
     } else {
-        currentMove = Math.max(currentMove - 5, 0)
+        currentMove = Math.max(currentMove - 6, 0)
+        if (stonesVisible || showPrefix) {
+            showOnlyMove(currentMove)
+        }
+    }
+}
+
+function goToEnd() {
+    console.log('=== goToEnd ===')
+    if (maxMoves === 0) initializeMoves()
+    
+    if (animateMode) {
+        startAnimation()
+    } else {
+        currentMove = maxMoves
         if (stonesVisible || showPrefix) {
             showOnlyMove(currentMove)
         }
@@ -354,7 +366,7 @@ function toggleAnimate() {
     }
 }
 
-function animateBackward(moves = 5) {
+function animateBackward(moves = 6) {
     console.log('=== animateBackward ===', 'moves:', moves)
     if (maxMoves === 0) initializeMoves()
     if (maxMoves === 0) {
@@ -564,12 +576,12 @@ function installButtons(n=0) {
     let secondRow = document.createElement('div')
     secondRow.className = 'd-flex flex-wrap align-items-center mb-2'
     
-    // Navigation buttons with consistent icons
+    // Navigation buttons with symmetric layout
     let beginningButton = button('⏮', () => goToBeginning())
     beginningButton.title = 'Go to beginning'
     
-    let back5Button = button('⏪', () => move5Backward())
-    back5Button.title = 'Move/animate 5 backward'
+    let back6Button = button('⏪', () => move6Backward())
+    back6Button.title = 'Move/animate 6 backward'
     
     let prevButton = button('⏴', () => prevMove())
     prevButton.title = 'Previous move/animate all'
@@ -577,19 +589,24 @@ function installButtons(n=0) {
     let nextButton = button('⏵', () => nextMove())
     nextButton.title = 'Next move/animate all'
     
-    let forward5Button = button('⏩', () => move5Forward())
-    forward5Button.title = 'Move/animate 5 forward'
+    let forward6Button = button('⏩', () => move6Forward())
+    forward6Button.title = 'Move/animate 6 forward'
+    
+    let endButton = button('⏭', () => goToEnd())
+    endButton.title = 'Go to end'
     
     // Add navigation buttons to second row
     secondRow.appendChild(beginningButton)
     secondRow.appendChild(document.createElement('span')).className = 'ms-1'
-    secondRow.appendChild(back5Button)
+    secondRow.appendChild(back6Button)
     secondRow.appendChild(document.createElement('span')).className = 'ms-1'
     secondRow.appendChild(prevButton)
     secondRow.appendChild(document.createElement('span')).className = 'ms-1'
     secondRow.appendChild(nextButton)
     secondRow.appendChild(document.createElement('span')).className = 'ms-1'
-    secondRow.appendChild(forward5Button)
+    secondRow.appendChild(forward6Button)
+    secondRow.appendChild(document.createElement('span')).className = 'ms-1'
+    secondRow.appendChild(endButton)
     
     // Create container for third row - speed controls
     let thirdRow = document.createElement('div')
@@ -636,8 +653,9 @@ function installButtons(n=0) {
     window.togglePrefix = togglePrefix
     window.animateBackward = animateBackward
     window.toggleAnimate = toggleAnimate
-    window.move5Forward = move5Forward
-    window.move5Backward = move5Backward
+    window.move6Forward = move6Forward
+    window.move6Backward = move6Backward
+    window.goToEnd = goToEnd
     window.addEventListener('load', () => {
         installButtons(0)
         setTimeout(startBoardMonitoring, 1000) // Start monitoring after page loads
