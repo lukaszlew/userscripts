@@ -13,6 +13,7 @@ let animationInterval = null;
 let animationSpeed = 1000; // milliseconds between moves
 let stonesVisible = true;
 let showPrefix = false; // true = show moves 1 to current, false = show only current move
+let lastBoardState = null;
 
 function hideVarStones(hide) {
     console.log('hideVarStones', hide)
@@ -368,6 +369,77 @@ function updateSpeedDisplay() {
     }
 }
 
+function getBoardState() {
+    let boards = document.getElementsByClassName('board')
+    if (boards.length === 0) return null
+    
+    let [board] = boards
+    let labels = board.getElementsByClassName('label')
+    if (labels.length < 2) return null
+    
+    let [coords, labelParent] = labels
+    let state = []
+    
+    for (let i = 0; i < labelParent.children.length; i++) {
+        let label = labelParent.children[i]
+        let classLabel = Array.from(label.classList).find(s=>s.startsWith('label'))
+        if (classLabel) {
+            state.push(classLabel)
+        }
+    }
+    
+    return state.sort().join('|')
+}
+
+function onBoardChange() {
+    console.log('=== Board changed detected ===')
+    stopAnimation()
+    
+    // Reinitialize and go to end of variation
+    initializeMoves()
+    if (maxMoves > 0) {
+        currentMove = maxMoves
+        console.log('Starting at end of variation, move:', currentMove)
+        showOnlyMove(currentMove)
+    }
+    
+    lastBoardState = getBoardState()
+}
+
+function checkForBoardChanges() {
+    let currentBoardState = getBoardState()
+    if (currentBoardState && currentBoardState !== lastBoardState) {
+        onBoardChange()
+    }
+}
+
+function startBoardMonitoring() {
+    console.log('=== Starting board monitoring ===')
+    
+    // Initial state
+    lastBoardState = getBoardState()
+    if (lastBoardState) {
+        onBoardChange() // Apply settings to initial state
+    }
+    
+    // Monitor for changes every 500ms
+    setInterval(checkForBoardChanges, 500)
+    
+    // Also listen for AI Sensei's navigation button clicks
+    document.addEventListener('click', (event) => {
+        let target = event.target.closest('div')
+        if (target && (
+            target.classList.contains('navigate-next-move') ||
+            target.classList.contains('navigate-previous-move') ||
+            target.classList.contains('navigate-last-move') ||
+            target.classList.contains('navigate-back-to-game')
+        )) {
+            console.log('AI Sensei navigation clicked')
+            setTimeout(checkForBoardChanges, 100) // Check after navigation completes
+        }
+    })
+}
+
 function installButtons(n=0) {
     function stillUndefined(x) {
         if (typeof x === "undefined") {
@@ -508,5 +580,8 @@ function installButtons(n=0) {
     window.goToBeginning = goToBeginning
     window.togglePrefix = togglePrefix
     window.animateBackward = animateBackward
-    window.addEventListener('load', () => installButtons(0), false);
+    window.addEventListener('load', () => {
+        installButtons(0)
+        setTimeout(startBoardMonitoring, 1000) // Start monitoring after page loads
+    }, false);
 })();
