@@ -149,7 +149,10 @@ function showOnlyMove(moveNum) {
 
 function initializeMoves() {
     console.log('=== initializeMoves START ===')
-    captureOriginalState()
+    // Only capture if we don't have any moves yet, board changes will recapture
+    if (moveElements.length === 0) {
+        captureOriginalState()
+    }
     currentMove = 0
     console.log('=== initializeMoves END ===', 'maxMoves:', maxMoves)
 }
@@ -404,8 +407,9 @@ function onBoardChange() {
     console.log('=== Board changed detected ===')
     stopAnimation()
     
-    // Reinitialize and go to end of variation
-    initializeMoves()
+    // Capture fresh DOM state from AI Sensei's new board
+    captureOriginalState()
+    
     if (maxMoves > 0) {
         currentMove = maxMoves
         console.log('Starting at end of variation, move:', currentMove)
@@ -429,10 +433,17 @@ function checkForBoardChanges() {
 function startBoardMonitoring() {
     console.log('=== Starting board monitoring ===')
     
-    // Initial state
+    // Initial state - capture clean DOM state from AI Sensei
     lastBoardState = getBoardState()
     if (lastBoardState) {
-        onBoardChange() // Apply settings to initial state
+        captureOriginalState() // Capture fresh state initially
+        if (maxMoves > 0) {
+            currentMove = maxMoves
+            // Only apply if toggles are enabled
+            if (stonesVisible || showPrefix) {
+                applyVisibilityRules(currentMove)
+            }
+        }
     }
     
     // Monitor for changes every 500ms
