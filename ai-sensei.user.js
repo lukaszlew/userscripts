@@ -7,6 +7,13 @@
 // @grant        none
 // ==/UserScript==
 
+// Add CSS for non-invasive hiding
+const style = document.createElement('style');
+style.textContent = `
+  .userscript-hidden { display: none !important; }
+`;
+document.head.appendChild(style);
+
 let currentMove = 0;
 let maxMoves = 0;
 let animationInterval = null;
@@ -52,6 +59,10 @@ function hideVarStones(hide) {
 
 function captureOriginalState() {
     console.log('=== captureOriginalState START ===')
+    
+    // First, reset all our modifications to get clean state
+    resetToNaturalState()
+    
     moveElements = []
     maxMoves = 0
     
@@ -88,9 +99,7 @@ function captureOriginalState() {
             let moveData = {
                 moveNumber,
                 labelElement: label,
-                stoneElement: stones.length > 0 ? stones[0] : null,
-                originalLabelDisplay: label.style.display || '',
-                originalStoneDisplay: stones.length > 0 ? (stones[0].style.display || '') : ''
+                stoneElement: stones.length > 0 ? stones[0] : null
             }
             
             moveElements.push(moveData)
@@ -103,12 +112,36 @@ function captureOriginalState() {
     console.log('=== captureOriginalState END ===', 'captured', moveElements.length, 'moves, maxMoves:', maxMoves)
 }
 
+function resetToNaturalState() {
+    console.log('=== resetToNaturalState START ===')
+    
+    // Remove all our CSS classes from all elements
+    let boards = document.getElementsByClassName('board')
+    if (boards.length > 0) {
+        let [board] = boards
+        let hiddenElements = board.querySelectorAll('.userscript-hidden')
+        hiddenElements.forEach(el => el.classList.remove('userscript-hidden'))
+    }
+    
+    console.log('=== resetToNaturalState END ===')
+}
+
 function applyVisibilityRules(moveNum) {
     console.log('=== applyVisibilityRules START ===', 'moveNum:', moveNum, 'stonesVisible:', stonesVisible, 'showPrefix:', showPrefix)
     
     if (moveElements.length === 0) {
         console.log('No move elements captured, calling captureOriginalState')
         captureOriginalState()
+    }
+    
+    // First reset to natural state
+    resetToNaturalState()
+    
+    // If no toggles are enabled, leave everything in natural state
+    if (!stonesVisible && !showPrefix) {
+        console.log('No toggles enabled, leaving in natural state')
+        console.log('=== applyVisibilityRules END ===')
+        return
     }
     
     for (let moveData of moveElements) {
@@ -121,19 +154,15 @@ function applyVisibilityRules(moveNum) {
         
         console.log(`Move ${moveData.moveNumber}: shouldShow=${shouldShow}`)
         
-        // Apply label visibility
-        if (shouldShow) {
-            moveData.labelElement.style.display = moveData.originalLabelDisplay
-        } else {
-            moveData.labelElement.style.display = 'none'
+        // Apply label visibility using CSS classes
+        if (!shouldShow) {
+            moveData.labelElement.classList.add('userscript-hidden')
         }
         
-        // Apply stone visibility
+        // Apply stone visibility using CSS classes
         if (moveData.stoneElement) {
-            if (shouldShow && stonesVisible) {
-                moveData.stoneElement.style.display = moveData.originalStoneDisplay
-            } else {
-                moveData.stoneElement.style.display = 'none'
+            if (!shouldShow || !stonesVisible) {
+                moveData.stoneElement.classList.add('userscript-hidden')
             }
         }
     }
@@ -273,9 +302,13 @@ function toggleStones() {
         updateButtonStyle(toggleButton, stonesVisible)
     }
     
-    // If currently showing a move, refresh the display
-    if (currentMove > 0 && (stonesVisible || showPrefix)) {
-        applyVisibilityRules(currentMove)
+    // Apply visibility rules or reset to natural state
+    if (currentMove > 0) {
+        if (stonesVisible || showPrefix) {
+            applyVisibilityRules(currentMove)
+        } else {
+            resetToNaturalState()
+        }
     }
 }
 
@@ -289,9 +322,13 @@ function togglePrefix() {
         updateButtonStyle(prefixButton, showPrefix)
     }
     
-    // If currently showing a move, refresh the display
-    if (currentMove > 0 && (stonesVisible || showPrefix)) {
-        applyVisibilityRules(currentMove)
+    // Apply visibility rules or reset to natural state
+    if (currentMove > 0) {
+        if (stonesVisible || showPrefix) {
+            applyVisibilityRules(currentMove)
+        } else {
+            resetToNaturalState()
+        }
     }
 }
 
@@ -414,9 +451,12 @@ function onBoardChange() {
         currentMove = maxMoves
         console.log('Starting at end of variation, move:', currentMove)
         
-        // Only apply modifications if either toggle is enabled
+        // Apply modifications if toggles enabled, otherwise stay in natural state
         if (stonesVisible || showPrefix) {
             applyVisibilityRules(currentMove)
+        } else {
+            // Board is already in natural state after captureOriginalState()
+            console.log('No toggles enabled, staying in natural state')
         }
     }
     
@@ -439,9 +479,11 @@ function startBoardMonitoring() {
         captureOriginalState() // Capture fresh state initially
         if (maxMoves > 0) {
             currentMove = maxMoves
-            // Only apply if toggles are enabled
+            // Only apply if toggles are enabled, otherwise stay natural
             if (stonesVisible || showPrefix) {
                 applyVisibilityRules(currentMove)
+            } else {
+                console.log('Initial load: No toggles enabled, staying in natural state')
             }
         }
     }
@@ -604,6 +646,7 @@ function installButtons(n=0) {
     window.move6Forward = move6Forward
     window.move6Backward = move6Backward
     window.goToEnd = goToEnd
+    window.resetToNaturalState = resetToNaturalState
     window.addEventListener('load', () => {
         installButtons(0)
         setTimeout(startBoardMonitoring, 1000) // Start monitoring after page loads
