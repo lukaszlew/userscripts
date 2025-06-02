@@ -15,6 +15,7 @@ let stonesVisible = false; // start disabled
 let showPrefix = false; // start disabled 
 let animateMode = false; // true = animate, false = immediate
 let lastBoardState = null;
+let moveElements = []; // Store original move data structure
 
 function hideVarStones(hide) {
     console.log('hideVarStones', hide)
@@ -49,101 +50,11 @@ function hideVarStones(hide) {
     return [board, allClassLabels]
 }
 
-function showOnlyMove(moveNum) {
-    console.log('=== showOnlyMove START ===', 'moveNum:', moveNum, 'currentMove:', currentMove, 'maxMoves:', maxMoves)
+function captureOriginalState() {
+    console.log('=== captureOriginalState START ===')
+    moveElements = []
+    maxMoves = 0
     
-    let boards = document.getElementsByClassName('board')
-    console.log('Found boards:', boards.length)
-    if (boards.length === 0) {
-        console.log('ERROR: No board found!')
-        return
-    }
-    let [board] = boards
-    
-    let labels = board.getElementsByClassName('label')
-    console.log('Found label containers:', labels.length)
-    if (labels.length === 0) {
-        console.log('ERROR: No label containers found!')
-        return
-    }
-    let [coords, labelParent] = labels
-    
-    if (!labelParent) {
-        console.log('ERROR: No labelParent found!')
-        return
-    }
-    
-    console.log('labelParent children count:', labelParent.children.length)
-    
-    let foundLabels = []
-    let labelActions = []
-    maxMoves = 0;
-    
-    for (let i = 0; i < labelParent.children.length; i++) {
-        let label = labelParent.children[i]
-        let classLabel = Array.from(label.classList).find(s=>s.startsWith('label'))
-        
-        if (!classLabel) {
-            console.log(`Child ${i}: no label class found, classes:`, Array.from(label.classList))
-            continue
-        }
-        
-        let parts = classLabel.split('-')
-        let labelText = parts[parts.length - 1]
-        let moveNumber = parseInt(labelText) || 0
-        
-        console.log(`Child ${i}: classLabel="${classLabel}", parts=[${parts.join(',')}], labelText="${labelText}", moveNumber=${moveNumber}`)
-        
-        foundLabels.push({index: i, classLabel, moveNumber, labelText})
-        
-        if (moveNumber > maxMoves) maxMoves = moveNumber
-        
-        if (moveNumber > 0) {
-            let shouldShow
-            if (showPrefix) {
-                shouldShow = moveNumber <= moveNum
-            } else {
-                shouldShow = moveNumber === moveNum
-            }
-            let action = shouldShow ? 'SHOW' : 'HIDE'
-            
-            console.log(`  Label action: ${action} (moveNumber ${moveNumber} ${shouldShow ? (showPrefix ? '<=' : '===') : (showPrefix ? '>' : '!==')} moveNum ${moveNum})`)
-            
-            // Show/hide labels
-            if (shouldShow) {
-                label.style.display = ''
-            } else {
-                label.style.display = 'none'
-            }
-            
-            // Always handle stones regardless of stonesVisible setting
-            let rowS = parts[1]
-            let colS = parts[2]
-            let stoneClass = 'stone-' + rowS + '-' + colS
-            let stones = board.getElementsByClassName(stoneClass)
-            
-            if (stones.length > 0) {
-                let [stone] = stones
-                if (shouldShow && stonesVisible) {
-                    stone.style.display = ''
-                } else {
-                    stone.style.display = 'none'
-                }
-            }
-            
-            labelActions.push({moveNumber, action})
-        }
-    }
-    
-    console.log('=== SUMMARY ===')
-    console.log('maxMoves found:', maxMoves)
-    console.log('foundLabels:', foundLabels)
-    console.log('labelActions:', labelActions)
-    console.log('=== showOnlyMove END ===')
-}
-
-function initializeMoves() {
-    console.log('=== initializeMoves START ===')
     let boards = document.getElementsByClassName('board')
     if (boards.length === 0) {
         console.log('ERROR: No board found!')
@@ -158,11 +69,6 @@ function initializeMoves() {
     }
     let [coords, labelParent] = labels
     
-    maxMoves = 0
-    currentMove = 0
-    
-    console.log('labelParent children count:', labelParent.children.length)
-    
     for (let i = 0; i < labelParent.children.length; i++) {
         let label = labelParent.children[i]
         let classLabel = Array.from(label.classList).find(s=>s.startsWith('label'))
@@ -173,11 +79,78 @@ function initializeMoves() {
         let labelText = parts[parts.length - 1]
         let moveNumber = parseInt(labelText) || 0
         
-        console.log(`Child ${i}: classLabel="${classLabel}", labelText="${labelText}", moveNumber=${moveNumber}`)
-        
-        if (moveNumber > maxMoves) maxMoves = moveNumber
+        if (moveNumber > 0) {
+            let rowS = parts[1]
+            let colS = parts[2]
+            let stoneClass = 'stone-' + rowS + '-' + colS
+            let stones = board.getElementsByClassName(stoneClass)
+            
+            let moveData = {
+                moveNumber,
+                labelElement: label,
+                stoneElement: stones.length > 0 ? stones[0] : null,
+                originalLabelDisplay: label.style.display || '',
+                originalStoneDisplay: stones.length > 0 ? (stones[0].style.display || '') : ''
+            }
+            
+            moveElements.push(moveData)
+            console.log(`Captured move ${moveNumber}:`, moveData)
+            
+            if (moveNumber > maxMoves) maxMoves = moveNumber
+        }
     }
     
+    console.log('=== captureOriginalState END ===', 'captured', moveElements.length, 'moves, maxMoves:', maxMoves)
+}
+
+function applyVisibilityRules(moveNum) {
+    console.log('=== applyVisibilityRules START ===', 'moveNum:', moveNum, 'stonesVisible:', stonesVisible, 'showPrefix:', showPrefix)
+    
+    if (moveElements.length === 0) {
+        console.log('No move elements captured, calling captureOriginalState')
+        captureOriginalState()
+    }
+    
+    for (let moveData of moveElements) {
+        let shouldShow
+        if (showPrefix) {
+            shouldShow = moveData.moveNumber <= moveNum
+        } else {
+            shouldShow = moveData.moveNumber === moveNum
+        }
+        
+        console.log(`Move ${moveData.moveNumber}: shouldShow=${shouldShow}`)
+        
+        // Apply label visibility
+        if (shouldShow) {
+            moveData.labelElement.style.display = moveData.originalLabelDisplay
+        } else {
+            moveData.labelElement.style.display = 'none'
+        }
+        
+        // Apply stone visibility
+        if (moveData.stoneElement) {
+            if (shouldShow && stonesVisible) {
+                moveData.stoneElement.style.display = moveData.originalStoneDisplay
+            } else {
+                moveData.stoneElement.style.display = 'none'
+            }
+        }
+    }
+    
+    console.log('=== applyVisibilityRules END ===')
+}
+
+function showOnlyMove(moveNum) {
+    console.log('=== showOnlyMove START ===', 'moveNum:', moveNum, 'currentMove:', currentMove, 'maxMoves:', maxMoves)
+    applyVisibilityRules(moveNum)
+    console.log('=== showOnlyMove END ===')
+}
+
+function initializeMoves() {
+    console.log('=== initializeMoves START ===')
+    captureOriginalState()
+    currentMove = 0
     console.log('=== initializeMoves END ===', 'maxMoves:', maxMoves)
 }
 
@@ -297,45 +270,9 @@ function toggleStones() {
         updateButtonStyle(toggleButton, stonesVisible)
     }
     
-    // Show/hide ALL stones immediately, regardless of current move
-    let boards = document.getElementsByClassName('board')
-    if (boards.length > 0) {
-        let [board] = boards
-        let labels = board.getElementsByClassName('label')
-        if (labels.length >= 2) {
-            let [coords, labelParent] = labels
-            
-            for (let i = 0; i < labelParent.children.length; i++) {
-                let label = labelParent.children[i]
-                let classLabel = Array.from(label.classList).find(s=>s.startsWith('label'))
-                
-                if (classLabel) {
-                    let parts = classLabel.split('-')
-                    let moveNumber = parseInt(parts[parts.length - 1]) || 0
-                    
-                    if (moveNumber > 0) {
-                        let rowS = parts[1]
-                        let colS = parts[2]
-                        let stoneClass = 'stone-' + rowS + '-' + colS
-                        let stones = board.getElementsByClassName(stoneClass)
-                        
-                        if (stones.length > 0) {
-                            let [stone] = stones
-                            if (stonesVisible) {
-                                stone.style.display = ''
-                            } else {
-                                stone.style.display = 'none'
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
     // If currently showing a move, refresh the display
     if (currentMove > 0 && (stonesVisible || showPrefix)) {
-        showOnlyMove(currentMove)
+        applyVisibilityRules(currentMove)
     }
 }
 
@@ -351,7 +288,7 @@ function togglePrefix() {
     
     // If currently showing a move, refresh the display
     if (currentMove > 0 && (stonesVisible || showPrefix)) {
-        showOnlyMove(currentMove)
+        applyVisibilityRules(currentMove)
     }
 }
 
@@ -475,7 +412,7 @@ function onBoardChange() {
         
         // Only apply modifications if either toggle is enabled
         if (stonesVisible || showPrefix) {
-            showOnlyMove(currentMove)
+            applyVisibilityRules(currentMove)
         }
     }
     
