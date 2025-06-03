@@ -47,6 +47,7 @@
                 });
             }
         }
+
     }
 
     // ===== VARIATION STATE =====
@@ -111,7 +112,9 @@
                 if (typeof newState[key] === 'object' && newState[key] !== null) {
                     // Avoid circular reference issues with DOM elements by doing shallow comparison
                     if (key === 'moves') {
-                        // For moves array, compare length and move numbers only
+                        // WHY SPECIAL MOVES COMPARISON: moves array contains DOM elements (labelElement, stoneElement)
+                        // JSON.stringify would fail due to circular references in DOM nodes
+                        // We only care if the actual move sequence changed, not DOM element references
                         if (!oldState[key] || oldState[key].length !== newState[key].length ||
                             !oldState[key].every((move, i) => move.moveNumber === newState[key][i]?.moveNumber)) {
                             changes[key] = newState[key];
@@ -158,6 +161,10 @@
         }
 
         setupCSS() {
+            // WHY CSS CLASSES INSTEAD OF INLINE STYLES: 
+            // 1. Completely reversible - can restore original state perfectly
+            // 2. No interference with AI Sensei's own style calculations
+            // 3. Clean separation between our modifications and original DOM
             const style = document.createElement('style');
             style.textContent = `
                 .userscript-hidden { display: none !important; }
@@ -299,17 +306,22 @@
                 const [coords, labelParent] = labels;
                 const moves = [];
 
+                // WHY THIS COMPLEX PARSING: AI Sensei uses CSS classes to encode board positions
+                // Example: class="label-10-15-3" means row=10, col=15, move=3
+                // We need to extract move numbers and find corresponding stone elements
                 for (let i = 0; i < labelParent.children.length; i++) {
                     const label = labelParent.children[i];
                     const classLabel = Array.from(label.classList).find(s => s.startsWith('label'));
                     
                     if (!classLabel) continue;
                     
+                    // Parse "label-row-col-moveNumber" format
                     const parts = classLabel.split('-');
-                    const labelText = parts[parts.length - 1];
+                    const labelText = parts[parts.length - 1];  // Last part is move number
                     const moveNumber = parseInt(labelText) || 0;
                     
                     if (moveNumber > 0) {
+                        // Find the corresponding stone element using same row/col coordinates
                         const rowS = parts[1];
                         const colS = parts[2];
                         const stoneClass = 'stone-' + rowS + '-' + colS;
@@ -346,10 +358,12 @@
             moves.forEach(moveData => {
                 let shouldShow;
                 if (settings.showPrefix) {
-                    // In prefix mode, show all moves in the variation
+                    // PREFIX MODE: Show entire variation sequence (all moves)
                     shouldShow = moveData.moveNumber <= maxMoves;
                 } else {
-                    // Show current move and next move (two most recent when currentMove = maxMoves - 1)
+                    // DEFAULT MODE: Show only current + next move for cleaner visualization
+                    // WHY TWO MOVES: In Go variations, seeing the immediate next move provides context
+                    // When currentMove = maxMoves-1, this shows the last two moves of the sequence
                     shouldShow = moveData.moveNumber === currentMove || moveData.moveNumber === currentMove + 1;
                 }
 
@@ -378,6 +392,8 @@
             this.stop();
             
             const currentState = this.state.get();
+            // WHY NULL/UNDEFINED CHECK: targetMove could legitimately be 0 (animate to beginning)
+            // Using truthy check would incorrectly treat 0 as "no target specified"
             const finalTarget = targetMove !== null && targetMove !== undefined ? targetMove : 
                 (direction === 'forward' ? currentState.maxMoves : 0);
 
@@ -502,7 +518,9 @@
                 return;
             }
             
-            // Handle Alt+A for toggle (no shift required)
+            // WHY ALT+A: Easy one-handed shortcut for most common action (toggle show/hide modes)
+            // WHY NO SHIFT: Alt+A is simpler than Shift+Alt+A for frequent use
+            // WHY BOTH 'a'/'A': event.key can be either depending on caps lock state
             if (event.altKey && (event.key === 'a' || event.key === 'A') && !event.shiftKey) {
                 event.preventDefault();
                 this.togglePrefix();
@@ -696,6 +714,8 @@
                 const option = document.createElement('option');
                 option.value = speed * 1000;
                 option.textContent = SPEED_LABELS[index];
+                // WHY 50ms TOLERANCE: Floating-point precision can cause exact matches to fail
+                // e.g. speed might be 999.999ms instead of exactly 1000ms due to calculations
                 if (Math.abs(speed * 1000 - currentState.animation.speed) < 50) {
                     option.selected = true;
                 }
@@ -738,23 +758,25 @@
         }
 
         updateButtonState(button, isPressed) {
-            // Invert logic: isPressed = showPrefix = show all moves = green OFF
-            // Default state: !isPressed = hide moves = green ON
+            // WHY INVERTED LOGIC: Button represents "filter active" not "show all active"
+            // Green ON = filtering active (hiding older moves) = cleaner default view
+            // Light OFF = no filtering (show all moves) = detailed analysis mode
+            // This matches traffic light metaphor: green = go/active, dark = inactive
             if (!isPressed) {
-                // Default state: hiding moves (showing only last moves) = GREEN ON
+                // DEFAULT STATE: Filter active, showing only recent moves (green light ON)
                 button.className = 'btn btn-success btn-sm';
                 button.style.backgroundColor = '#28a745';
                 button.style.borderColor = '#28a745';
                 button.style.color = '#fff';
-                button.innerHTML = '🟢'; // Green light ON
+                button.innerHTML = '🟢'; // Green light ON = filter active
                 console.log('🎯 Hide mode ON - showing last moves only (green light)');
             } else {
-                // Prefix mode: showing all moves = GREEN OFF  
+                // PREFIX MODE: No filtering, showing all moves (light OFF)
                 button.className = 'btn btn-outline-secondary btn-sm';
                 button.style.backgroundColor = '';
                 button.style.borderColor = '';
                 button.style.color = '';
-                button.innerHTML = '⚫'; // Light OFF (dark circle)
+                button.innerHTML = '⚫'; // Light OFF = no filtering
                 console.log('🎯 Show all mode ON - showing all moves (light off)');
             }
             
@@ -765,14 +787,6 @@
             button.style.transition = 'all 0.2s ease-in-out';
         }
 
-        formatSpeed(speedMs) {
-            const speedS = speedMs / 1000;
-            if (speedS < 1) {
-                return `${speedS.toFixed(2)}s`.replace(/\.?0+$/, 's');
-            } else {
-                return `${speedS.toFixed(1)}s`;
-            }
-        }
 
         // Action methods
         togglePrefix() {
@@ -830,7 +844,9 @@
             this.animationEngine.stop();
             
             // Get the target move (where we want to animate to)
-            // Since we now show two moves by default, animate to second-to-last move
+            // WHY ANIMATE TO maxMoves-1: This triggers our "show last 2 moves" display
+            // Animation builds up the sequence, then stops at the natural viewing state
+            // User sees the full variation build-up, ending with clean 2-move view
             const targetMove = Math.max(0, currentState.maxMoves - 1);
             
             // Reset to beginning first
@@ -860,33 +876,6 @@
             }
         }
 
-        move6Forward() {
-            this.animationEngine.stop();
-            const currentState = this.state.get();
-            const targetMove = Math.min(currentState.currentMove + 6, currentState.maxMoves);
-            
-            this.state.update({ currentMove: targetMove });
-        }
-
-        move6Backward() {
-            this.animationEngine.stop();
-            const currentState = this.state.get();
-            const targetMove = Math.max(currentState.currentMove - 6, 0);
-            
-            this.state.update({ currentMove: targetMove });
-        }
-
-        goToBeginning() {
-            this.animationEngine.stop();
-            this.state.update({ currentMove: 0 });
-        }
-
-        goToEnd() {
-            this.animationEngine.stop();
-            const currentState = this.state.get();
-            
-            this.state.update({ currentMove: currentState.maxMoves });
-        }
 
         findSpeedIndex(currentSpeedMs) {
             // Find closest speed index with better precision handling
@@ -952,11 +941,6 @@
             }
         }
         
-        changeSpeed(multiplier) {
-            const currentState = this.state.get();
-            const newSpeed = currentState.animation.speed * multiplier;
-            this.animationEngine.setSpeed(newSpeed);
-        }
     }
 
     // ===== MAIN CONTROLLER =====
@@ -987,7 +971,9 @@
             const moves = this.gameAdapter.getMoves();
             const maxMoves = moves.length > 0 ? Math.max(...moves.map(m => m.moveNumber)) : 0;
             
-            // Show two most recent moves by default (or all moves if less than 2)
+            // WHY maxMoves - 1: With our "show current + next" logic, this displays the last 2 moves
+            // When currentMove = maxMoves-1, we show moves (maxMoves-1) and (maxMoves)
+            // This provides context while keeping the board clean
             const defaultCurrentMove = Math.max(0, maxMoves - 1);
             
             this.state.update({
