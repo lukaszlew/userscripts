@@ -171,21 +171,41 @@
                 this.observer.observe(boardElement, {
                     childList: true,
                     subtree: true,
-                    attributeFilter: ['class']
+                    attributes: true,
+                    attributeFilter: ['class', 'style'],
+                    characterData: true
                 });
             }
+
+            // Also observe the entire document body for broader changes
+            this.documentObserver = new MutationObserver(() => {
+                this.eventBus.emit('ui-check-needed');
+            });
+            
+            this.documentObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
 
             // Also listen for AI Sensei navigation clicks
             document.addEventListener('click', this.handleNavigationClick.bind(this));
             
-            // Fallback polling every 1 second
-            setInterval(() => this.checkForBoardChanges(), 1000);
+            // Fallback polling every 250ms for better responsiveness
+            setInterval(() => this.checkForBoardChanges(), 250);
+            
+            // Also poll for UI restoration every 500ms
+            setInterval(() => this.eventBus.emit('ui-check-needed'), 500);
         }
 
         stopMonitoring() {
             if (this.observer) {
                 this.observer.disconnect();
                 this.observer = null;
+            }
+            
+            if (this.documentObserver) {
+                this.documentObserver.disconnect();
+                this.documentObserver = null;
             }
             
             // Remove click event listener
@@ -202,7 +222,11 @@
                 target.classList.contains('navigate-last-move') ||
                 target.classList.contains('navigate-back-to-game')
             )) {
-                setTimeout(() => this.checkForBoardChanges(), 100);
+                // Check immediately for instant response
+                this.checkForBoardChanges();
+                // Follow up checks to catch delayed DOM updates
+                setTimeout(() => this.checkForBoardChanges(), 5);
+                setTimeout(() => this.checkForBoardChanges(), 25);
             }
         }
 
@@ -420,8 +444,24 @@
                 this.updateView(newState, changes);
             });
             
+            this.eventBus.on('ui-check-needed', () => {
+                this.checkAndRestoreUI();
+            });
+            
             // Add keyboard shortcuts
             document.addEventListener('keydown', this.handleKeyboardShortcuts.bind(this));
+        }
+
+        checkAndRestoreUI() {
+            // Check if our controls are still present and the sidebar exists
+            const existingControls = document.querySelector('.userscript-variation-controls');
+            const sidebarTopCard = document.querySelector('.sidebar-top-card');
+            
+            if (!existingControls && sidebarTopCard) {
+                // Controls were removed but sidebar exists, re-install them
+                console.log('UI controls missing, restoring...');
+                setTimeout(() => this.install(), 50);
+            }
         }
 
         handleKeyboardShortcuts(event) {
@@ -438,6 +478,14 @@
                 case 'ArrowRight':
                     event.preventDefault();
                     this.nextMove();
+                    break;
+                case 'KeyP':
+                    event.preventDefault();
+                    this.togglePrefix();
+                    break;
+                case 'KeyA':
+                    event.preventDefault();
+                    this.animateToCurrentMove();
                     break;
             }
         }
@@ -566,7 +614,7 @@
             // Update button states
             if (changes.settings) {
                 if ('showPrefix' in changes.settings) {
-                    this.updateButtonStyle(this.elements.buttons.prefix, newState.settings.showPrefix);
+                    this.updateCompactButtonStyle(this.elements.buttons.prefix, newState.settings.showPrefix);
                 }
             }
 
@@ -587,17 +635,191 @@
                 return;
             }
             
-            const problemButton = document.getElementsByClassName('tutorial-anchor-add-problem-button')[0];
-            if (!problemButton) {
+            // Remove any existing controls first
+            const existingControls = document.querySelector('.userscript-variation-controls');
+            if (existingControls) {
+                existingControls.remove();
+            }
+            
+            // Look for a stable location - the sidebar top area
+            const sidebarTopCard = document.querySelector('.sidebar-top-card');
+            if (!sidebarTopCard) {
                 setTimeout(() => this.install(retryCount + 1), 200);
                 return;
             }
 
-            this.elements = this.createUI();
+            this.elements = this.createSidebarControls();
             
-            const top = document.getElementsByClassName('game-sidebar')[0].parentElement;
-            const firstChild = top.firstChild;
-            top.insertBefore(this.elements.container, firstChild);
+            // Insert at the end of the sidebar top card
+            sidebarTopCard.appendChild(this.elements);
+        }
+
+        createSidebarControls() {
+            const currentState = this.state.get();
+            
+            // Create main container with class for detection
+            const container = document.createElement('div');
+            container.className = 'userscript-variation-controls mt-2';
+            container.style.borderTop = '1px solid #dee2e6';
+            container.style.paddingTop = '0.5rem';
+            
+            // Create header
+            const header = document.createElement('div');
+            header.className = 'd-flex align-items-center justify-content-between mb-2';
+            header.innerHTML = '<small class="text-muted fw-bold">VARIATION TOOLS</small>';
+            
+            // Create controls row
+            const controlsRow = document.createElement('div');
+            controlsRow.className = 'd-flex align-items-center gap-2 flex-wrap';
+            
+            // Create button elements object for compatibility
+            this.elements = { buttons: {}, container, speedDisplay: null };
+            
+            // Prefix toggle button
+            this.elements.buttons.prefix = this.createCompactButton('🔢', () => this.togglePrefix());
+            this.elements.buttons.prefix.title = 'Toggle prefix mode - show all moves up to current (Shift+P)';
+            this.updateCompactButtonStyle(this.elements.buttons.prefix, currentState.settings.showPrefix);
+            
+            // Animate button
+            this.elements.buttons.animateToHere = this.createCompactButton('▶️', () => this.animateToCurrentMove());
+            this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+A)';
+            
+            // Navigation buttons
+            this.elements.buttons.prev = this.createCompactButton('⏴', () => this.prevMove());
+            this.elements.buttons.prev.title = 'Previous move (Shift+←)';
+            
+            this.elements.buttons.next = this.createCompactButton('⏵', () => this.nextMove());
+            this.elements.buttons.next.title = 'Next move (Shift+→)';
+            
+            // Speed display
+            this.elements.speedDisplay = document.createElement('span');
+            this.elements.speedDisplay.className = 'badge bg-secondary text-white';
+            this.elements.speedDisplay.textContent = `${(currentState.animation.speed / 1000).toFixed(1)}s`;
+            this.elements.speedDisplay.title = 'Animation speed - click to change';
+            this.elements.speedDisplay.style.fontSize = '0.65em';
+            this.elements.speedDisplay.style.cursor = 'pointer';
+            this.elements.speedDisplay.style.minWidth = '2.2em';
+            this.elements.speedDisplay.style.textAlign = 'center';
+            
+            // Add click handler to cycle through speeds
+            this.elements.speedDisplay.addEventListener('click', () => {
+                const speeds = [0.5, 1.0, 1.5, 2.0];
+                const current = currentState.animation.speed / 1000;
+                const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.1);
+                const nextIndex = (currentIndex + 1) % speeds.length;
+                this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
+            });
+            
+            // Add controls to row
+            controlsRow.appendChild(this.elements.buttons.prefix);
+            controlsRow.appendChild(this.elements.buttons.animateToHere);
+            controlsRow.appendChild(this.elements.speedDisplay);
+            
+            // Add separator
+            const separator = document.createElement('span');
+            separator.className = 'text-muted';
+            separator.textContent = '|';
+            controlsRow.appendChild(separator);
+            
+            controlsRow.appendChild(this.elements.buttons.prev);
+            controlsRow.appendChild(this.elements.buttons.next);
+            
+            // Assemble container
+            container.appendChild(header);
+            container.appendChild(controlsRow);
+            
+            return container;
+        }
+
+        createVariationControls(container) {
+            const currentState = this.state.get();
+            
+            // Create button elements object for compatibility
+            this.elements = { buttons: {} };
+            
+            // Prefix toggle button
+            this.elements.buttons.prefix = this.createAISenseiButton('🔢', () => this.togglePrefix());
+            this.elements.buttons.prefix.title = 'Toggle prefix mode - show all moves up to current';
+            this.updateButtonStyle(this.elements.buttons.prefix, currentState.settings.showPrefix);
+            
+            // Animate button
+            this.elements.buttons.animateToHere = this.createAISenseiButton('▶️', () => this.animateToCurrentMove());
+            this.elements.buttons.animateToHere.title = 'Animate variation up to current move';
+            
+            // Navigation buttons
+            const navButtons = [
+                { key: 'beginning', icon: '⏮', action: () => this.goToBeginning(), title: 'Go to beginning' },
+                { key: 'prev', icon: '⏴', action: () => this.prevMove(), title: 'Previous move (Shift+←)' },
+                { key: 'next', icon: '⏵', action: () => this.nextMove(), title: 'Next move (Shift+→)' },
+                { key: 'end', icon: '⏭', action: () => this.goToEnd(), title: 'Go to end' }
+            ];
+            
+            navButtons.forEach(btn => {
+                this.elements.buttons[btn.key] = this.createAISenseiButton(btn.icon, btn.action);
+                this.elements.buttons[btn.key].title = btn.title;
+            });
+            
+            // Speed controls
+            this.elements.buttons.slower = this.createAISenseiButton('🐌', () => this.changeSpeed(1.5));
+            this.elements.buttons.slower.title = 'Slower animation';
+            
+            this.elements.speedDisplay = document.createElement('span');
+            this.elements.speedDisplay.className = 'badge bg-secondary mx-1';
+            this.elements.speedDisplay.textContent = `${(currentState.animation.speed / 1000).toFixed(1)}s`;
+            this.elements.speedDisplay.title = 'Animation speed';
+            this.elements.speedDisplay.style.fontSize = '0.7em';
+            
+            this.elements.buttons.faster = this.createAISenseiButton('🐰', () => this.changeSpeed(0.67));
+            this.elements.buttons.faster.title = 'Faster animation';
+            
+            // Add all buttons to container with proper spacing
+            const buttonOrder = [
+                'prefix', 'animateToHere', 'speedDisplay', 
+                'beginning', 'prev', 'next', 'end',
+                'slower', 'speedDisplay', 'faster'
+            ];
+            
+            // Add main controls
+            container.appendChild(this.elements.buttons.prefix);
+            container.appendChild(this.createSpacer());
+            container.appendChild(this.elements.buttons.animateToHere);
+            container.appendChild(this.createSpacer());
+            
+            // Add navigation
+            container.appendChild(this.elements.buttons.beginning);
+            container.appendChild(this.createSpacer());
+            container.appendChild(this.elements.buttons.prev);
+            container.appendChild(this.createSpacer());
+            container.appendChild(this.elements.buttons.next);
+            container.appendChild(this.createSpacer());
+            container.appendChild(this.elements.buttons.end);
+            container.appendChild(this.createSpacer());
+            
+            // Add speed controls
+            container.appendChild(this.elements.buttons.slower);
+            container.appendChild(this.createSpacer());
+            container.appendChild(this.elements.speedDisplay);
+            container.appendChild(this.createSpacer());
+            container.appendChild(this.elements.buttons.faster);
+        }
+
+        createCompactButton(label, onClick) {
+            const button = document.createElement('button');
+            button.className = 'btn btn-outline-secondary btn-sm';
+            button.style.fontSize = '0.8em';
+            button.style.padding = '0.25rem 0.5rem';
+            button.style.minWidth = '2.2em';
+            button.addEventListener('click', onClick);
+            button.textContent = label;
+            return button;
+        }
+
+        updateCompactButtonStyle(button, isPressed) {
+            if (isPressed) {
+                button.className = 'btn btn-secondary btn-sm';
+            } else {
+                button.className = 'btn btn-outline-secondary btn-sm';
+            }
         }
 
         // Action methods
