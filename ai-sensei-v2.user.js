@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Hide and show variations (Clean Architecture)
-// @version      4.4
+// @version      5.0
 // @description  Clean architecture implementation for variation visualization on AI Sensei
 // @author       Lukasz Lew
 // @match        https://*.ai-sensei.com/*
@@ -10,7 +10,7 @@
 (function() {
     'use strict';
     
-    const SCRIPT_VERSION = '4.4';
+    const SCRIPT_VERSION = '5.0';
     console.log(`🎯 Variation Visualizer v${SCRIPT_VERSION} loading...`);
 
     // ===== EVENT BUS =====
@@ -72,18 +72,21 @@
         update(changes) {
             const oldState = { ...this.data };
             
+            // Create a copy to avoid mutating input parameter
+            const changesCopy = { ...changes };
+            
             // Deep merge for nested objects
-            if (changes.settings) {
-                this.data.settings = { ...this.data.settings, ...changes.settings };
-                delete changes.settings;
+            if (changesCopy.settings) {
+                this.data.settings = { ...this.data.settings, ...changesCopy.settings };
+                delete changesCopy.settings;
             }
-            if (changes.animation) {
-                this.data.animation = { ...this.data.animation, ...changes.animation };
-                delete changes.animation;
+            if (changesCopy.animation) {
+                this.data.animation = { ...this.data.animation, ...changesCopy.animation };
+                delete changesCopy.animation;
             }
             
-            // Shallow merge for top-level properties
-            this.data = { ...this.data, ...changes };
+            // Shallow merge for remaining top-level properties
+            this.data = { ...this.data, ...changesCopy };
             
             // Validate state
             this.validateState();
@@ -144,8 +147,12 @@
         constructor(eventBus) {
             this.eventBus = eventBus;
             this.observer = null;
+            this.documentObserver = null;
             this.lastBoardState = null;
             this.isMonitoring = false;
+            this.boardCheckInterval = null;
+            this.uiCheckInterval = null;
+            this.boundHandleNavigationClick = null;
             
             this.setupCSS();
         }
@@ -191,14 +198,13 @@
                 subtree: true
             });
 
-            // Also listen for AI Sensei navigation clicks
-            document.addEventListener('click', this.handleNavigationClick.bind(this));
+            // Store bound function reference for proper cleanup
+            this.boundHandleNavigationClick = this.handleNavigationClick.bind(this);
+            document.addEventListener('click', this.boundHandleNavigationClick);
             
-            // Fallback polling every 250ms for better responsiveness
-            setInterval(() => this.checkForBoardChanges(), 250);
-            
-            // Also poll for UI restoration every 500ms
-            setInterval(() => this.eventBus.emit('ui-check-needed'), 500);
+            // Store interval IDs for proper cleanup
+            this.boardCheckInterval = setInterval(() => this.checkForBoardChanges(), 250);
+            this.uiCheckInterval = setInterval(() => this.eventBus.emit('ui-check-needed'), 500);
         }
 
         stopMonitoring() {
@@ -212,8 +218,22 @@
                 this.documentObserver = null;
             }
             
-            // Remove click event listener
-            document.removeEventListener('click', this.handleNavigationClick.bind(this));
+            // Clear intervals
+            if (this.boardCheckInterval) {
+                clearInterval(this.boardCheckInterval);
+                this.boardCheckInterval = null;
+            }
+            
+            if (this.uiCheckInterval) {
+                clearInterval(this.uiCheckInterval);
+                this.uiCheckInterval = null;
+            }
+            
+            // Remove event listener using stored reference
+            if (this.boundHandleNavigationClick) {
+                document.removeEventListener('click', this.boundHandleNavigationClick);
+                this.boundHandleNavigationClick = null;
+            }
             
             this.isMonitoring = false;
         }
@@ -868,9 +888,25 @@
             this.state.update({ currentMove: currentState.maxMoves });
         }
 
+        findSpeedIndex(currentSpeedMs) {
+            // Find closest speed index with better precision handling
+            let closestIndex = 0;
+            let minDiff = Infinity;
+            
+            ANIMATION_SPEEDS.forEach((speed, index) => {
+                const diff = Math.abs(speed * 1000 - currentSpeedMs);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIndex = index;
+                }
+            });
+            
+            return closestIndex;
+        }
+
         increaseSpeed() {
-            const current = this.state.get().animation.speed / 1000;
-            const currentIndex = ANIMATION_SPEEDS.findIndex(s => Math.abs(s - current) < 0.01);
+            const currentSpeedMs = this.state.get().animation.speed;
+            const currentIndex = this.findSpeedIndex(currentSpeedMs);
             
             if (currentIndex < ANIMATION_SPEEDS.length - 1) {
                 const nextIndex = currentIndex + 1;
@@ -883,8 +919,8 @@
         }
         
         decreaseSpeed() {
-            const current = this.state.get().animation.speed / 1000;
-            const currentIndex = ANIMATION_SPEEDS.findIndex(s => Math.abs(s - current) < 0.01);
+            const currentSpeedMs = this.state.get().animation.speed;
+            const currentIndex = this.findSpeedIndex(currentSpeedMs);
             
             if (currentIndex > 0) {
                 const nextIndex = currentIndex - 1;
