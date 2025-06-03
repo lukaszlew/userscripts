@@ -59,7 +59,8 @@
                 maxMoves: 0,
                 currentMove: 0,
                 settings: {
-                    showPrefix: false
+                    showPrefix: false,
+                    hideStones: false
                 },
                 animation: {
                     speed: 1000,
@@ -386,9 +387,11 @@
                     moveData.labelElement.classList.add('userscript-hidden');
                 }
 
-                // Hide stones that shouldn't be shown
-                if (moveData.stoneElement && !shouldShow) {
-                    moveData.stoneElement.classList.add('userscript-hidden');
+                // Hide stones based on visibility and hideStones setting
+                if (moveData.stoneElement) {
+                    if (!shouldShow || settings.hideStones) {
+                        moveData.stoneElement.classList.add('userscript-hidden');
+                    }
                 }
             });
         }
@@ -588,6 +591,9 @@
                 if ('showPrefix' in changes.settings && this.elements.buttons && this.elements.buttons.prefix) {
                     this.updateButtonState(this.elements.buttons.prefix, newState.settings.showPrefix);
                 }
+                if ('hideStones' in changes.settings && this.elements.buttons && this.elements.buttons.hideStones) {
+                    this.updateHideStonesButtonState(this.elements.buttons.hideStones, newState.settings.hideStones);
+                }
             }
 
             // Update speed controls
@@ -663,6 +669,11 @@
             this.elements.buttons.prefix.title = 'Hide/show moves: ON = last moves only, OFF = all moves (Alt+A)';
             this.updateButtonState(this.elements.buttons.prefix, currentState.settings.showPrefix);
             
+            // Hide stones toggle button
+            this.elements.buttons.hideStones = this.createCompactButton('⚫', () => this.toggleHideStones());
+            this.elements.buttons.hideStones.title = 'Hide/show stones under numbers';
+            this.updateHideStonesButtonState(this.elements.buttons.hideStones, currentState.settings.hideStones);
+            
             // Animate button
             this.elements.buttons.animateToHere = this.createCompactButton('▶️', () => this.animateToCurrentMove());
             this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+Alt+→)';
@@ -682,6 +693,7 @@
             
             // Add controls to row
             controlsRow.appendChild(this.elements.buttons.prefix);
+            controlsRow.appendChild(this.elements.buttons.hideStones);
             
             // Add separator
             const separator1 = document.createElement('span');
@@ -801,6 +813,29 @@
             button.style.transition = 'all 0.2s ease-in-out';
         }
 
+        updateHideStonesButtonState(button, isPressed) {
+            // WHY STONE EMOJI: Visual representation of hiding/showing stones under numbers
+            if (isPressed) {
+                // HIDE STONES: Active hiding state (red/dark)
+                button.className = 'btn btn-warning btn-sm';
+                button.style.backgroundColor = '#dc3545';
+                button.style.borderColor = '#dc3545';
+                button.style.color = '#fff';
+                button.innerHTML = '🚫'; // No stones visible
+            } else {
+                // SHOW STONES: Normal state (stones visible)
+                button.className = 'btn btn-outline-secondary btn-sm';
+                button.style.backgroundColor = '';
+                button.style.borderColor = '';
+                button.style.color = '';
+                button.innerHTML = '⚫'; // Stone visible
+            }
+            
+            button.style.boxShadow = 'none';
+            button.style.transform = 'scale(1)';
+            button.style.animation = 'none';
+            button.style.transition = 'all 0.2s ease-in-out';
+        }
 
         // Action methods
         togglePrefix() {
@@ -843,6 +878,17 @@
             }
             
             return null;
+        }
+
+        toggleHideStones() {
+            this.animationEngine.stop();
+            const currentState = this.state.get();
+            const newHideStonesState = !currentState.settings.hideStones;
+            console.log(`🔄 Toggling hide stones from ${currentState.settings.hideStones} to ${newHideStonesState}`);
+            
+            this.state.update({
+                settings: { hideStones: newHideStonesState }
+            });
         }
 
         animateToCurrentMove() {
