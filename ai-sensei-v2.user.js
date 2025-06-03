@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Hide and show variations (Clean Architecture)
-// @version      3.9
+// @version      4.4
 // @description  Clean architecture implementation for variation visualization on AI Sensei
 // @author       Lukasz Lew
 // @match        https://*.ai-sensei.com/*
@@ -10,7 +10,7 @@
 (function() {
     'use strict';
     
-    const SCRIPT_VERSION = '3.9';
+    const SCRIPT_VERSION = '4.4';
     console.log(`🎯 Variation Visualizer v${SCRIPT_VERSION} loading...`);
 
     // ===== EVENT BUS =====
@@ -155,11 +155,6 @@
             style.textContent = `
                 .userscript-hidden { display: none !important; }
                 
-                @keyframes pulse {
-                    0% { box-shadow: 0 0 10px rgba(40, 167, 69, 0.6); }
-                    50% { box-shadow: 0 0 15px rgba(40, 167, 69, 0.8); }
-                    100% { box-shadow: 0 0 10px rgba(40, 167, 69, 0.6); }
-                }
             `;
             document.head.appendChild(style);
         }
@@ -440,6 +435,10 @@
         }
     }
 
+    // ===== CONSTANTS =====
+    const ANIMATION_SPEEDS = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
+    const SPEED_LABELS = ['0.1s', '0.15s', '0.2s', '0.3s', '0.5s', '0.7s', '1.0s', '1.5s', '2.0s', '3.0s', '5.0s'];
+
     // ===== UI CONTROLLER =====
     class UIController {
         constructor(eventBus, state, gameAdapter, animationEngine) {
@@ -478,8 +477,21 @@
         }
 
         handleKeyboardShortcuts(event) {
-            // Only handle when Shift is pressed and we're not in an input field
-            if (!event.shiftKey || event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+            // Handle Shift+key and Alt+key combinations, avoid input fields
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+                return;
+            }
+            
+            // Handle Alt+A for toggle (no shift required)
+            if (event.altKey && (event.key === 'a' || event.key === 'A') && !event.shiftKey) {
+                event.preventDefault();
+                this.togglePrefix();
+                console.log('🎯 Alt+A pressed - toggling prefix');
+                return;
+            }
+            
+            // Only handle remaining shortcuts when Shift is pressed
+            if (!event.shiftKey) {
                 return;
             }
 
@@ -506,135 +518,15 @@
                     }
                     break;
                 case 'ArrowDown':
-                    // Shift+Alt+Down for slower speed, Shift+Down for prefix toggle
+                    // Shift+Alt+Down for slower speed
                     if (event.altKey) {
                         event.preventDefault();
                         this.increaseSpeed();
-                    } else {
-                        event.preventDefault();
-                        this.togglePrefix();
                     }
                     break;
             }
         }
 
-        createUI() {
-            const elements = {
-                container: document.createElement('div'),
-                rows: {
-                    toggles: document.createElement('div'),
-                    navigation: document.createElement('div'),
-                    speed: document.createElement('div')
-                },
-                buttons: {}
-            };
-
-            // Setup container
-            elements.container.className = 'userscript-variation-controls';
-
-            // Setup rows
-            elements.rows.toggles.className = 'd-flex flex-wrap align-items-center mb-2';
-            elements.rows.navigation.className = 'd-flex flex-wrap align-items-center mb-2';
-            elements.rows.speed.className = 'd-flex flex-wrap align-items-center';
-
-            // Create buttons
-            this.createToggleButtons(elements);
-            this.createNavigationButtons(elements);
-            this.createSpeedControls(elements);
-
-            // Assemble UI
-            elements.container.appendChild(elements.rows.toggles);
-            elements.container.appendChild(elements.rows.navigation);
-            elements.container.appendChild(elements.rows.speed);
-
-            return elements;
-        }
-
-        createToggleButtons(elements) {
-            const currentState = this.state.get();
-
-            elements.buttons.prefix = this.createButton('🔢', () => this.togglePrefix());
-            elements.buttons.prefix.title = 'Toggle prefix mode';
-            this.updateButtonStyle(elements.buttons.prefix, currentState.settings.showPrefix);
-
-            elements.buttons.animateToHere = this.createButton('▶️', () => this.animateToCurrentMove());
-            elements.buttons.animateToHere.title = 'Animate variation up to current move';
-
-            elements.rows.toggles.appendChild(elements.buttons.prefix);
-            elements.rows.toggles.appendChild(this.createSpacer());
-            elements.rows.toggles.appendChild(elements.buttons.animateToHere);
-        }
-
-        createNavigationButtons(elements) {
-            const navButtons = [
-                { key: 'beginning', icon: '⏮', action: () => this.goToBeginning(), title: 'Go to beginning' },
-                { key: 'back6', icon: '⏪', action: () => this.move6Backward(), title: 'Move 6 backward' },
-                { key: 'prev', icon: '⏴', action: () => this.prevMove(), title: 'Previous move (Shift+←)' },
-                { key: 'next', icon: '⏵', action: () => this.nextMove(), title: 'Next move (Shift+→)' },
-                { key: 'forward6', icon: '⏩', action: () => this.move6Forward(), title: 'Move 6 forward' },
-                { key: 'end', icon: '⏭', action: () => this.goToEnd(), title: 'Go to end' }
-            ];
-
-            navButtons.forEach((btn, index) => {
-                elements.buttons[btn.key] = this.createButton(btn.icon, btn.action);
-                elements.buttons[btn.key].title = btn.title;
-                elements.rows.navigation.appendChild(elements.buttons[btn.key]);
-                
-                if (index < navButtons.length - 1) {
-                    elements.rows.navigation.appendChild(this.createSpacer());
-                }
-            });
-        }
-
-        createSpeedControls(elements) {
-            const currentState = this.state.get();
-
-            elements.buttons.slower = this.createButton('🐌', () => this.changeSpeed(1.5));
-            elements.buttons.slower.title = 'Slower animation';
-
-            elements.speedDisplay = document.createElement('span');
-            elements.speedDisplay.className = 'badge bg-secondary mx-2';
-            elements.speedDisplay.textContent = `${(currentState.animation.speed / 1000).toFixed(1)}s`;
-            elements.speedDisplay.title = 'Animation speed';
-
-            elements.buttons.faster = this.createButton('🐰', () => this.changeSpeed(0.67));
-            elements.buttons.faster.title = 'Faster animation';
-
-            elements.rows.speed.appendChild(elements.buttons.slower);
-            elements.rows.speed.appendChild(elements.speedDisplay);
-            elements.rows.speed.appendChild(elements.buttons.faster);
-        }
-
-        createButton(label, onClick) {
-            const button = document.createElement('button');
-            button.className = 'btn btn-primary';
-            button.addEventListener('click', onClick);
-            
-            const span = document.createElement('span');
-            span.className = 'd-flex align-items-center';
-            span.innerHTML = label;
-            button.appendChild(span);
-            
-            return button;
-        }
-
-        createSpacer() {
-            const spacer = document.createElement('span');
-            spacer.className = 'ms-1';
-            return spacer;
-        }
-
-        updateButtonStyle(button, isPressed) {
-            if (isPressed) {
-                button.classList.add('btn-success');
-                button.classList.remove('btn-primary');
-                button.style.boxShadow = 'inset 0 3px 5px rgba(0,0,0,0.3)';
-            } else {
-                button.classList.add('btn-primary');
-                button.classList.remove('btn-success');
-                button.style.boxShadow = '';
-            }
-        }
 
         updateView(newState, changes) {
             if (!this.elements) return;
@@ -642,7 +534,7 @@
             // Update button states
             if (changes.settings) {
                 if ('showPrefix' in changes.settings && this.elements.buttons && this.elements.buttons.prefix) {
-                    this.updateCompactButtonStyle(this.elements.buttons.prefix, newState.settings.showPrefix);
+                    this.updateButtonState(this.elements.buttons.prefix, newState.settings.showPrefix);
                 }
             }
 
@@ -716,8 +608,8 @@
             
             // Prefix toggle button (inverted logic: ON = hide moves, OFF = show all)
             this.elements.buttons.prefix = this.createCompactButton('🟢', () => this.togglePrefix());
-            this.elements.buttons.prefix.title = 'Hide/show moves: ON = last moves only, OFF = all moves (Shift+↓)';
-            this.updateCompactButtonStyle(this.elements.buttons.prefix, currentState.settings.showPrefix);
+            this.elements.buttons.prefix.title = 'Hide/show moves: ON = last moves only, OFF = all moves (Alt+A)';
+            this.updateButtonState(this.elements.buttons.prefix, currentState.settings.showPrefix);
             
             // Animate button
             this.elements.buttons.animateToHere = this.createCompactButton('▶️', () => this.animateToCurrentMove());
@@ -780,13 +672,10 @@
             select.style.cursor = 'pointer';
             select.title = 'Animation speed (Shift+Alt+↑/↓)';
             
-            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
-            const speedLabels = ['0.1s', '0.15s', '0.2s', '0.3s', '0.5s', '0.7s', '1.0s', '1.5s', '2.0s', '3.0s', '5.0s'];
-            
-            speeds.forEach((speed, index) => {
+            ANIMATION_SPEEDS.forEach((speed, index) => {
                 const option = document.createElement('option');
                 option.value = speed * 1000;
-                option.textContent = speedLabels[index];
+                option.textContent = SPEED_LABELS[index];
                 if (Math.abs(speed * 1000 - currentState.animation.speed) < 50) {
                     option.selected = true;
                 }
@@ -816,77 +705,6 @@
             return button;
         }
 
-        createVariationControls(container) {
-            const currentState = this.state.get();
-            
-            // Create button elements object for compatibility
-            this.elements = { buttons: {} };
-            
-            // Prefix toggle button
-            this.elements.buttons.prefix = this.createAISenseiButton('🔢', () => this.togglePrefix());
-            this.elements.buttons.prefix.title = 'Toggle prefix mode - show all moves up to current';
-            this.updateButtonStyle(this.elements.buttons.prefix, currentState.settings.showPrefix);
-            
-            // Animate button
-            this.elements.buttons.animateToHere = this.createAISenseiButton('▶️', () => this.animateToCurrentMove());
-            this.elements.buttons.animateToHere.title = 'Animate variation up to current move';
-            
-            // Navigation buttons
-            const navButtons = [
-                { key: 'beginning', icon: '⏮', action: () => this.goToBeginning(), title: 'Go to beginning' },
-                { key: 'prev', icon: '⏴', action: () => this.prevMove(), title: 'Previous move (Shift+←)' },
-                { key: 'next', icon: '⏵', action: () => this.nextMove(), title: 'Next move (Shift+→)' },
-                { key: 'end', icon: '⏭', action: () => this.goToEnd(), title: 'Go to end' }
-            ];
-            
-            navButtons.forEach(btn => {
-                this.elements.buttons[btn.key] = this.createAISenseiButton(btn.icon, btn.action);
-                this.elements.buttons[btn.key].title = btn.title;
-            });
-            
-            // Speed controls
-            this.elements.buttons.slower = this.createAISenseiButton('🐌', () => this.changeSpeed(1.5));
-            this.elements.buttons.slower.title = 'Slower animation';
-            
-            this.elements.speedDisplay = document.createElement('span');
-            this.elements.speedDisplay.className = 'badge bg-secondary mx-1';
-            this.elements.speedDisplay.textContent = `${(currentState.animation.speed / 1000).toFixed(1)}s`;
-            this.elements.speedDisplay.title = 'Animation speed';
-            this.elements.speedDisplay.style.fontSize = '0.7em';
-            
-            this.elements.buttons.faster = this.createAISenseiButton('🐰', () => this.changeSpeed(0.67));
-            this.elements.buttons.faster.title = 'Faster animation';
-            
-            // Add all buttons to container with proper spacing
-            const buttonOrder = [
-                'prefix', 'animateToHere', 'speedDisplay', 
-                'beginning', 'prev', 'next', 'end',
-                'slower', 'speedDisplay', 'faster'
-            ];
-            
-            // Add main controls
-            container.appendChild(this.elements.buttons.prefix);
-            container.appendChild(this.createSpacer());
-            container.appendChild(this.elements.buttons.animateToHere);
-            container.appendChild(this.createSpacer());
-            
-            // Add navigation
-            container.appendChild(this.elements.buttons.beginning);
-            container.appendChild(this.createSpacer());
-            container.appendChild(this.elements.buttons.prev);
-            container.appendChild(this.createSpacer());
-            container.appendChild(this.elements.buttons.next);
-            container.appendChild(this.createSpacer());
-            container.appendChild(this.elements.buttons.end);
-            container.appendChild(this.createSpacer());
-            
-            // Add speed controls
-            container.appendChild(this.elements.buttons.slower);
-            container.appendChild(this.createSpacer());
-            container.appendChild(this.elements.speedDisplay);
-            container.appendChild(this.createSpacer());
-            container.appendChild(this.elements.buttons.faster);
-        }
 
         createCompactButton(label, onClick) {
             const button = document.createElement('button');
@@ -899,7 +717,7 @@
             return button;
         }
 
-        updateCompactButtonStyle(button, isPressed) {
+        updateButtonState(button, isPressed) {
             // Invert logic: isPressed = showPrefix = show all moves = green OFF
             // Default state: !isPressed = hide moves = green ON
             if (!isPressed) {
@@ -947,30 +765,36 @@
                 settings: { showPrefix: newPrefixState }
             });
             
-            // Force update the button immediately - try multiple ways to find it
-            let prefixButton = null;
-            
-            if (this.elements && this.elements.buttons && this.elements.buttons.prefix) {
-                prefixButton = this.elements.buttons.prefix;
-                console.log('🎯 Found prefix button via stored reference');
-            } else {
-                // Fallback: find button in DOM by looking for the one with light emojis
-                const buttons = document.querySelectorAll('.userscript-variation-controls button');
-                for (const btn of buttons) {
-                    if (btn.innerHTML.includes('🟢') || btn.innerHTML.includes('⚫')) {
-                        prefixButton = btn;
-                        console.log('🎯 Found prefix button via DOM search');
-                        break;
-                    }
-                }
-            }
-            
+            this.forceUpdatePrefixButton(newPrefixState);
+        }
+
+        forceUpdatePrefixButton(newPrefixState) {
+            const prefixButton = this.findPrefixButton();
             if (prefixButton) {
                 console.log('🎯 Force updating prefix button style');
-                this.updateCompactButtonStyle(prefixButton, newPrefixState);
+                this.updateButtonState(prefixButton, newPrefixState);
             } else {
                 console.warn('⚠️ Prefix button element not found anywhere!');
             }
+        }
+
+        findPrefixButton() {
+            // Try stored reference first
+            if (this.elements && this.elements.buttons && this.elements.buttons.prefix) {
+                console.log('🎯 Found prefix button via stored reference');
+                return this.elements.buttons.prefix;
+            }
+            
+            // Fallback: search DOM for button with light emojis
+            const buttons = document.querySelectorAll('.userscript-variation-controls button');
+            for (const btn of buttons) {
+                if (btn.innerHTML.includes('🟢') || btn.innerHTML.includes('⚫')) {
+                    console.log('🎯 Found prefix button via DOM search');
+                    return btn;
+                }
+            }
+            
+            return null;
         }
 
         animateToCurrentMove() {
@@ -1045,14 +869,13 @@
         }
 
         increaseSpeed() {
-            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
             const current = this.state.get().animation.speed / 1000;
-            const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
+            const currentIndex = ANIMATION_SPEEDS.findIndex(s => Math.abs(s - current) < 0.01);
             
-            if (currentIndex < speeds.length - 1) {
+            if (currentIndex < ANIMATION_SPEEDS.length - 1) {
                 const nextIndex = currentIndex + 1;
-                this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
-                console.log(`⚡ Speed increased to ${speeds[nextIndex]}s`);
+                this.animationEngine.setSpeed(ANIMATION_SPEEDS[nextIndex] * 1000);
+                console.log(`⚡ Speed increased to ${ANIMATION_SPEEDS[nextIndex]}s`);
                 
                 // Update dropdown and display immediately
                 this.updateSpeedControls();
@@ -1060,14 +883,13 @@
         }
         
         decreaseSpeed() {
-            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
             const current = this.state.get().animation.speed / 1000;
-            const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
+            const currentIndex = ANIMATION_SPEEDS.findIndex(s => Math.abs(s - current) < 0.01);
             
             if (currentIndex > 0) {
                 const nextIndex = currentIndex - 1;
-                this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
-                console.log(`🐌 Speed decreased to ${speeds[nextIndex]}s`);
+                this.animationEngine.setSpeed(ANIMATION_SPEEDS[nextIndex] * 1000);
+                console.log(`🐌 Speed decreased to ${ANIMATION_SPEEDS[nextIndex]}s`);
                 
                 // Update dropdown and display immediately
                 this.updateSpeedControls();
