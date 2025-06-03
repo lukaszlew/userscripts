@@ -315,23 +315,30 @@
                     
                     if (!classLabel) continue;
                     
-                    // Parse "label-row-col-moveNumber" format
+                    // Parse "label-row-col-moveNumber" format (numbers) or "label-row-col-letter" (A,B,C,D)
                     const parts = classLabel.split('-');
-                    const labelText = parts[parts.length - 1];  // Last part is move number
+                    const labelText = parts[parts.length - 1];  // Last part is move number or letter
                     const moveNumber = parseInt(labelText) || 0;
+                    const isLetterMove = /^[A-Z]$/.test(labelText);
                     
-                    if (moveNumber > 0) {
+                    // Include both numbered moves and letter moves (variation candidates)
+                    if (moveNumber > 0 || isLetterMove) {
                         // Find the corresponding stone element using same row/col coordinates
                         const rowS = parts[1];
                         const colS = parts[2];
                         const stoneClass = 'stone-' + rowS + '-' + colS;
                         const stones = board.getElementsByClassName(stoneClass);
                         
-                        moves.push({
-                            moveNumber,
+                        const moveData = {
+                            moveNumber: isLetterMove ? 999 : moveNumber,  // Letters get high number to show last
                             labelElement: label,
-                            stoneElement: stones.length > 0 ? stones[0] : null
-                        });
+                            stoneElement: stones.length > 0 ? stones[0] : null,
+                            isLetter: isLetterMove,
+                            letterText: isLetterMove ? labelText : null
+                        };
+                        
+                        
+                        moves.push(moveData);
                     }
                 }
 
@@ -353,12 +360,19 @@
         applyVisibility(moves, currentMove, settings) {
             this.resetToNaturalState();
 
-            const maxMoves = moves.length > 0 ? Math.max(...moves.map(m => m.moveNumber)) : 0;
+            // Calculate maxMoves excluding letter moves (which have artificial moveNumber 999)
+            const numberedMoves = moves.filter(m => !m.isLetter);
+            const maxMoves = numberedMoves.length > 0 ? Math.max(...numberedMoves.map(m => m.moveNumber)) : 0;
 
             moves.forEach(moveData => {
                 let shouldShow;
-                if (settings.showPrefix) {
-                    // PREFIX MODE: Show entire variation sequence (all moves)
+                
+                if (moveData.isLetter) {
+                    // LETTER MOVES: Show only when we're at the "live" end of the sequence
+                    // These represent current AI suggestions, not historical moves
+                    shouldShow = currentMove >= maxMoves - 1; // Show only when at end position
+                } else if (settings.showPrefix) {
+                    // PREFIX MODE: Show entire variation sequence (all numbered moves)
                     shouldShow = moveData.moveNumber <= maxMoves;
                 } else {
                     // DEFAULT MODE: Show only current + next move for cleaner visualization
@@ -969,7 +983,9 @@
             this.animationEngine.stop();
             
             const moves = this.gameAdapter.getMoves();
-            const maxMoves = moves.length > 0 ? Math.max(...moves.map(m => m.moveNumber)) : 0;
+            // Calculate maxMoves excluding letter moves (which have artificial moveNumber 999)
+            const numberedMoves = moves.filter(m => !m.isLetter);
+            const maxMoves = numberedMoves.length > 0 ? Math.max(...numberedMoves.map(m => m.moveNumber)) : 0;
             
             // WHY maxMoves - 1: With our "show current + next" logic, this displays the last 2 moves
             // When currentMove = maxMoves-1, we show moves (maxMoves-1) and (maxMoves)
