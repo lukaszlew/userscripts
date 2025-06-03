@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Hide and show variations (Clean Architecture)
-// @version      3.5
+// @version      3.9
 // @description  Clean architecture implementation for variation visualization on AI Sensei
 // @author       Lukasz Lew
 // @match        https://*.ai-sensei.com/*
@@ -10,7 +10,7 @@
 (function() {
     'use strict';
     
-    const SCRIPT_VERSION = '3.5';
+    const SCRIPT_VERSION = '3.9';
     console.log(`🎯 Variation Visualizer v${SCRIPT_VERSION} loading...`);
 
     // ===== EVENT BUS =====
@@ -154,6 +154,12 @@
             const style = document.createElement('style');
             style.textContent = `
                 .userscript-hidden { display: none !important; }
+                
+                @keyframes pulse {
+                    0% { box-shadow: 0 0 10px rgba(40, 167, 69, 0.6); }
+                    50% { box-shadow: 0 0 15px rgba(40, 167, 69, 0.8); }
+                    100% { box-shadow: 0 0 10px rgba(40, 167, 69, 0.6); }
+                }
             `;
             document.head.appendChild(style);
         }
@@ -708,9 +714,9 @@
                 speedDropdown: null 
             };
             
-            // Prefix toggle button
-            this.elements.buttons.prefix = this.createCompactButton('🔢', () => this.togglePrefix());
-            this.elements.buttons.prefix.title = 'Toggle prefix mode - show all moves up to current (Shift+↓)';
+            // Prefix toggle button (inverted logic: ON = hide moves, OFF = show all)
+            this.elements.buttons.prefix = this.createCompactButton('🟢', () => this.togglePrefix());
+            this.elements.buttons.prefix.title = 'Hide/show moves: ON = last moves only, OFF = all moves (Shift+↓)';
             this.updateCompactButtonStyle(this.elements.buttons.prefix, currentState.settings.showPrefix);
             
             // Animate button
@@ -894,11 +900,31 @@
         }
 
         updateCompactButtonStyle(button, isPressed) {
-            if (isPressed) {
-                button.className = 'btn btn-secondary btn-sm';
+            // Invert logic: isPressed = showPrefix = show all moves = green OFF
+            // Default state: !isPressed = hide moves = green ON
+            if (!isPressed) {
+                // Default state: hiding moves (showing only last moves) = GREEN ON
+                button.className = 'btn btn-success btn-sm';
+                button.style.backgroundColor = '#28a745';
+                button.style.borderColor = '#28a745';
+                button.style.color = '#fff';
+                button.innerHTML = '🟢'; // Green light ON
+                console.log('🎯 Hide mode ON - showing last moves only (green light)');
             } else {
+                // Prefix mode: showing all moves = GREEN OFF  
                 button.className = 'btn btn-outline-secondary btn-sm';
+                button.style.backgroundColor = '';
+                button.style.borderColor = '';
+                button.style.color = '';
+                button.innerHTML = '⚫'; // Light OFF (dark circle)
+                console.log('🎯 Show all mode ON - showing all moves (light off)');
             }
+            
+            // Remove all the flashy effects
+            button.style.boxShadow = 'none';
+            button.style.transform = 'scale(1)';
+            button.style.animation = 'none';
+            button.style.transition = 'all 0.2s ease-in-out';
         }
 
         formatSpeed(speedMs) {
@@ -914,9 +940,37 @@
         togglePrefix() {
             this.animationEngine.stop();
             const currentState = this.state.get();
+            const newPrefixState = !currentState.settings.showPrefix;
+            console.log(`🔄 Toggling prefix from ${currentState.settings.showPrefix} to ${newPrefixState}`);
+            
             this.state.update({
-                settings: { showPrefix: !currentState.settings.showPrefix }
+                settings: { showPrefix: newPrefixState }
             });
+            
+            // Force update the button immediately - try multiple ways to find it
+            let prefixButton = null;
+            
+            if (this.elements && this.elements.buttons && this.elements.buttons.prefix) {
+                prefixButton = this.elements.buttons.prefix;
+                console.log('🎯 Found prefix button via stored reference');
+            } else {
+                // Fallback: find button in DOM by looking for the one with light emojis
+                const buttons = document.querySelectorAll('.userscript-variation-controls button');
+                for (const btn of buttons) {
+                    if (btn.innerHTML.includes('🟢') || btn.innerHTML.includes('⚫')) {
+                        prefixButton = btn;
+                        console.log('🎯 Found prefix button via DOM search');
+                        break;
+                    }
+                }
+            }
+            
+            if (prefixButton) {
+                console.log('🎯 Force updating prefix button style');
+                this.updateCompactButtonStyle(prefixButton, newPrefixState);
+            } else {
+                console.warn('⚠️ Prefix button element not found anywhere!');
+            }
         }
 
         animateToCurrentMove() {
