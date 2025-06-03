@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Hide and show variations (Clean Architecture)
-// @version      2.5
+// @version      2.9
 // @description  Clean architecture implementation for variation visualization on AI Sensei
 // @author       Lukasz Lew
 // @match        https://*.ai-sensei.com/*
@@ -10,7 +10,7 @@
 (function() {
     'use strict';
     
-    const SCRIPT_VERSION = '2.5';
+    const SCRIPT_VERSION = '2.9';
     console.log(`🎯 Variation Visualizer v${SCRIPT_VERSION} loading...`);
 
     // ===== EVENT BUS =====
@@ -325,7 +325,8 @@
                 if (settings.showPrefix) {
                     shouldShow = moveData.moveNumber <= currentMove;
                 } else {
-                    shouldShow = moveData.moveNumber === currentMove;
+                    // Show current move and next move (two most recent when currentMove = maxMoves - 1)
+                    shouldShow = moveData.moveNumber === currentMove || moveData.moveNumber === currentMove + 1;
                 }
 
                 // Hide labels that shouldn't be shown
@@ -479,16 +480,32 @@
                     this.prevMove();
                     break;
                 case 'ArrowRight':
-                    event.preventDefault();
-                    this.nextMove();
+                    // Shift+Ctrl+Right for animation, Shift+Right for next move
+                    if (event.ctrlKey) {
+                        event.preventDefault();
+                        this.animateToCurrentMove();
+                    } else {
+                        event.preventDefault();
+                        this.nextMove();
+                    }
+                    break;
+                case 'ArrowUp':
+                    // Shift+Ctrl+Up for faster speed
+                    if (event.ctrlKey) {
+                        event.preventDefault();
+                        this.decreaseSpeed();
+                    }
+                    break;
+                case 'ArrowDown':
+                    // Shift+Ctrl+Down for slower speed
+                    if (event.ctrlKey) {
+                        event.preventDefault();
+                        this.increaseSpeed();
+                    }
                     break;
                 case 'KeyP':
                     event.preventDefault();
                     this.togglePrefix();
-                    break;
-                case 'KeyA':
-                    event.preventDefault();
-                    this.animateToCurrentMove();
                     break;
             }
         }
@@ -621,9 +638,9 @@
                 }
             }
 
-            // Update speed display
-            if (changes.animation && 'speed' in changes.animation && this.elements.speedDisplay) {
-                this.elements.speedDisplay.textContent = this.formatSpeed(newState.animation.speed);
+            // Update speed controls
+            if (changes.animation && 'speed' in changes.animation) {
+                this.updateSpeedControls();
             }
 
             // Update visibility
@@ -696,14 +713,10 @@
             
             // Animate button
             this.elements.buttons.animateToHere = this.createCompactButton('▶️', () => this.animateToCurrentMove());
-            this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+A)';
+            this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+Ctrl+→)';
             
-            // Speed controls
-            this.elements.buttons.slower = this.createCompactButton('🐰', () => this.decreaseSpeed());
-            this.elements.buttons.slower.title = 'Faster animation (left side)';
-            
-            this.elements.buttons.faster = this.createCompactButton('🐌', () => this.increaseSpeed());
-            this.elements.buttons.faster.title = 'Slower animation (right side)';
+            // Speed dropdown
+            this.elements.speedDropdown = this.createSpeedDropdown(currentState);
             
             // Animation button with speed display integrated
             this.elements.buttons.animateWithSpeed = this.createAnimationButton(currentState);
@@ -724,9 +737,8 @@
             separator1.textContent = '|';
             controlsRow.appendChild(separator1);
             
-            controlsRow.appendChild(this.elements.buttons.slower);
+            controlsRow.appendChild(this.elements.speedDropdown);
             controlsRow.appendChild(this.elements.buttons.animateWithSpeed);
-            controlsRow.appendChild(this.elements.buttons.faster);
             
             // Add separator
             const separator2 = document.createElement('span');
@@ -744,6 +756,53 @@
             return container;
         }
 
+        createSpeedDropdown(currentState) {
+            const select = document.createElement('select');
+            select.className = 'form-select form-select-sm';
+            select.style.fontSize = '0.75em';
+            select.style.padding = '0.25rem 0.5rem';
+            select.style.minWidth = '4.5em';
+            select.style.maxWidth = '5.5em';
+            select.style.border = '1px solid #6c757d';
+            select.style.borderRadius = '0.375rem';
+            select.style.backgroundColor = '#f8f9fa';
+            select.style.color = '#495057';
+            select.style.boxShadow = '0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)';
+            select.style.transition = 'all 0.15s ease-in-out';
+            select.title = 'Animation speed (Shift+Ctrl+↑/↓)';
+            
+            // Add hover effect
+            select.addEventListener('mouseenter', () => {
+                select.style.borderColor = '#adb5bd';
+                select.style.boxShadow = '0 0.125rem 0.25rem rgba(0, 0, 0, 0.15)';
+            });
+            
+            select.addEventListener('mouseleave', () => {
+                select.style.borderColor = '#6c757d';
+                select.style.boxShadow = '0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)';
+            });
+            
+            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
+            const speedLabels = ['0.1s', '0.15s', '0.2s', '0.3s', '0.5s', '0.7s', '1.0s', '1.5s', '2.0s', '3.0s', '5.0s'];
+            
+            speeds.forEach((speed, index) => {
+                const option = document.createElement('option');
+                option.value = speed * 1000;
+                option.textContent = speedLabels[index];
+                if (Math.abs(speed * 1000 - currentState.animation.speed) < 50) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+            
+            select.addEventListener('change', () => {
+                const newSpeed = parseInt(select.value);
+                this.animationEngine.setSpeed(newSpeed);
+            });
+            
+            return select;
+        }
+
         createAnimationButton(currentState) {
             // Create a combined button with animation icon and speed display
             const button = document.createElement('button');
@@ -754,7 +813,7 @@
             button.style.display = 'flex';
             button.style.alignItems = 'center';
             button.style.gap = '0.25rem';
-            button.title = 'Animate variation up to current move (Shift+A) - click speed to change';
+            button.title = 'Animate variation up to current move (Shift+Ctrl+→) - click speed to change';
             
             // Animation icon
             const icon = document.createElement('span');
@@ -782,7 +841,7 @@
                 event.preventDefault();
                 event.stopPropagation();
                 
-                const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+                const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
                 const current = this.state.get().animation.speed / 1000;
                 const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
                 const nextIndex = (currentIndex + 1) % speeds.length;
@@ -925,7 +984,8 @@
             this.animationEngine.stop();
             
             // Get the target move (where we want to animate to)
-            const targetMove = Math.max(1, currentState.currentMove);
+            // Since we now show two moves by default, animate to second-to-last move
+            const targetMove = Math.max(0, currentState.maxMoves - 1);
             
             // Reset to beginning first
             this.state.update({ currentMove: 0 });
@@ -978,22 +1038,22 @@
         }
 
         increaseSpeed() {
-            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
             const current = this.state.get().animation.speed / 1000;
             const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
             
             if (currentIndex < speeds.length - 1) {
                 const nextIndex = currentIndex + 1;
                 this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
-                console.log(`🐰 Speed increased to ${speeds[nextIndex]}s`);
+                console.log(`⚡ Speed increased to ${speeds[nextIndex]}s`);
                 
-                // Update display immediately
-                this.updateSpeedDisplay();
+                // Update dropdown and display immediately
+                this.updateSpeedControls();
             }
         }
         
         decreaseSpeed() {
-            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
             const current = this.state.get().animation.speed / 1000;
             const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
             
@@ -1002,9 +1062,14 @@
                 this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
                 console.log(`🐌 Speed decreased to ${speeds[nextIndex]}s`);
                 
-                // Update display immediately
-                this.updateSpeedDisplay();
+                // Update dropdown and display immediately
+                this.updateSpeedControls();
             }
+        }
+        
+        updateSpeedControls() {
+            this.updateSpeedDisplay();
+            this.updateSpeedDropdown();
         }
         
         updateSpeedDisplay() {
@@ -1024,6 +1089,22 @@
                 console.log(`📊 Speed display updated to ${this.formatSpeed(currentSpeed)}`);
             } else {
                 console.warn('⚠️ Speed display element not found in DOM');
+            }
+        }
+        
+        updateSpeedDropdown() {
+            if (this.elements && this.elements.speedDropdown) {
+                const currentSpeed = this.state.get().animation.speed;
+                this.elements.speedDropdown.value = currentSpeed;
+                console.log(`📊 Speed dropdown updated to ${currentSpeed}ms`);
+            } else {
+                // Fallback: search in DOM
+                const dropdown = document.querySelector('.userscript-variation-controls .form-select');
+                if (dropdown) {
+                    const currentSpeed = this.state.get().animation.speed;
+                    dropdown.value = currentSpeed;
+                    console.log(`📊 Speed dropdown updated to ${currentSpeed}ms`);
+                }
             }
         }
         
@@ -1062,10 +1143,13 @@
             const moves = this.gameAdapter.getMoves();
             const maxMoves = moves.length > 0 ? Math.max(...moves.map(m => m.moveNumber)) : 0;
             
+            // Show two most recent moves by default (or all moves if less than 2)
+            const defaultCurrentMove = Math.max(0, maxMoves - 1);
+            
             this.state.update({
                 moves,
                 maxMoves,
-                currentMove: maxMoves
+                currentMove: defaultCurrentMove
             });
         }
 
