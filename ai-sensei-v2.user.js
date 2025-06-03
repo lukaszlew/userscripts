@@ -545,6 +545,14 @@
                 return;
             }
             
+            // WHY ALT+S: Easy shortcut for numbers-only mode (S for Stones hide)
+            if (event.altKey && (event.key === 's' || event.key === 'S') && !event.shiftKey) {
+                event.preventDefault();
+                this.toggleHideStones();
+                console.log('🎯 Alt+S pressed - toggling numbers-only mode');
+                return;
+            }
+            
             // Only handle remaining shortcuts when Shift is pressed
             if (!event.shiftKey) {
                 return;
@@ -670,8 +678,8 @@
             this.updateButtonState(this.elements.buttons.prefix, currentState.settings.showPrefix);
             
             // Hide stones toggle button
-            this.elements.buttons.hideStones = this.createCompactButton('⚫', () => this.toggleHideStones());
-            this.elements.buttons.hideStones.title = 'Hide/show stones under numbers';
+            this.elements.buttons.hideStones = this.createCompactButton('1️⃣', () => this.toggleHideStones());
+            this.elements.buttons.hideStones.title = 'Hide/show stones: ON = numbers only, OFF = stones + numbers (Alt+S)';
             this.updateHideStonesButtonState(this.elements.buttons.hideStones, currentState.settings.hideStones);
             
             // Animate button
@@ -814,27 +822,33 @@
         }
 
         updateHideStonesButtonState(button, isPressed) {
-            // WHY STONE EMOJI: Visual representation of hiding/showing stones under numbers
+            // WHY NUMBER ICON: Clear representation of "numbers only" mode
+            // Clear all inline styles first to avoid conflicts
+            button.style.cssText = '';
+            
             if (isPressed) {
-                // HIDE STONES: Active hiding state (red/dark)
-                button.className = 'btn btn-warning btn-sm';
-                button.style.backgroundColor = '#dc3545';
-                button.style.borderColor = '#dc3545';
-                button.style.color = '#fff';
-                button.innerHTML = '🚫'; // No stones visible
+                // NUMBERS ONLY MODE: Active/enabled state (green button)
+                button.className = 'btn btn-success btn-sm';
+                button.style.backgroundColor = '#28a745 !important';
+                button.style.borderColor = '#28a745 !important';
+                button.style.color = '#fff !important';
+                button.innerHTML = '1️⃣'; // Number emoji for numbers-only mode
+                console.log('🔢 Numbers-only mode ON');
             } else {
-                // SHOW STONES: Normal state (stones visible)
+                // NORMAL MODE: Disabled/muted appearance (show stones + numbers)
                 button.className = 'btn btn-outline-secondary btn-sm';
-                button.style.backgroundColor = '';
-                button.style.borderColor = '';
-                button.style.color = '';
-                button.innerHTML = '⚫'; // Stone visible
+                button.style.backgroundColor = 'transparent !important';
+                button.style.borderColor = '#6c757d !important';
+                button.style.color = '#6c757d !important';
+                button.style.opacity = '0.6 !important';
+                button.innerHTML = '1️⃣'; // Same icon, but muted
+                console.log('🔢 Normal mode ON (stones + numbers)');
             }
             
-            button.style.boxShadow = 'none';
-            button.style.transform = 'scale(1)';
-            button.style.animation = 'none';
-            button.style.transition = 'all 0.2s ease-in-out';
+            button.style.boxShadow = 'none !important';
+            button.style.transform = 'scale(1) !important';
+            button.style.animation = 'none !important';
+            button.style.transition = 'all 0.2s ease-in-out !important';
         }
 
         // Action methods
@@ -880,6 +894,35 @@
             return null;
         }
 
+        forceUpdateHideStonesButton(newHideStonesState) {
+            const hideStonesButton = this.findHideStonesButton();
+            if (hideStonesButton) {
+                console.log('🎯 Force updating hideStones button style');
+                this.updateHideStonesButtonState(hideStonesButton, newHideStonesState);
+            } else {
+                console.warn('⚠️ HideStones button element not found anywhere!');
+            }
+        }
+
+        findHideStonesButton() {
+            // Try stored reference first
+            if (this.elements && this.elements.buttons && this.elements.buttons.hideStones) {
+                console.log('🎯 Found hideStones button via stored reference');
+                return this.elements.buttons.hideStones;
+            }
+            
+            // Fallback: search DOM for button with number emoji
+            const buttons = document.querySelectorAll('.userscript-variation-controls button');
+            for (const btn of buttons) {
+                if (btn.innerHTML.includes('1️⃣')) {
+                    console.log('🎯 Found hideStones button via DOM search');
+                    return btn;
+                }
+            }
+            
+            return null;
+        }
+
         toggleHideStones() {
             this.animationEngine.stop();
             const currentState = this.state.get();
@@ -889,6 +932,8 @@
             this.state.update({
                 settings: { hideStones: newHideStonesState }
             });
+            
+            this.forceUpdateHideStonesButton(newHideStonesState);
         }
 
         animateToCurrentMove() {
