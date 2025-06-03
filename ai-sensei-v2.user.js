@@ -545,11 +545,12 @@
                 return;
             }
             
-            // WHY ALT+S: Easy shortcut for numbers-only mode (S for Stones hide)
-            if (event.altKey && (event.key === 's' || event.key === 'S') && !event.shiftKey) {
+            // WHY ALT+N: Easy shortcut for numbers-only mode (N for Numbers)
+            // Alt+S might be reserved by browser, so using Alt+N instead
+            if (event.altKey && (event.key === 'n' || event.key === 'N') && !event.shiftKey) {
                 event.preventDefault();
+                event.stopPropagation();
                 this.toggleHideStones();
-                console.log('🎯 Alt+S pressed - toggling numbers-only mode');
                 return;
             }
             
@@ -679,7 +680,7 @@
             
             // Hide stones toggle button
             this.elements.buttons.hideStones = this.createCompactButton('1️⃣', () => this.toggleHideStones());
-            this.elements.buttons.hideStones.title = 'Hide/show stones: ON = numbers only, OFF = stones + numbers (Alt+S)';
+            this.elements.buttons.hideStones.title = 'Hide/show stones: ON = numbers only, OFF = stones + numbers (Alt+N)';
             this.updateHideStonesButtonState(this.elements.buttons.hideStones, currentState.settings.hideStones);
             
             // Animate button
