@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Hide and show variations (Clean Architecture)
-// @version      2.9
+// @version      3.5
 // @description  Clean architecture implementation for variation visualization on AI Sensei
 // @author       Lukasz Lew
 // @match        https://*.ai-sensei.com/*
@@ -10,7 +10,7 @@
 (function() {
     'use strict';
     
-    const SCRIPT_VERSION = '2.9';
+    const SCRIPT_VERSION = '3.5';
     console.log(`🎯 Variation Visualizer v${SCRIPT_VERSION} loading...`);
 
     // ===== EVENT BUS =====
@@ -320,10 +320,13 @@
         applyVisibility(moves, currentMove, settings) {
             this.resetToNaturalState();
 
+            const maxMoves = moves.length > 0 ? Math.max(...moves.map(m => m.moveNumber)) : 0;
+
             moves.forEach(moveData => {
                 let shouldShow;
                 if (settings.showPrefix) {
-                    shouldShow = moveData.moveNumber <= currentMove;
+                    // In prefix mode, show all moves in the variation
+                    shouldShow = moveData.moveNumber <= maxMoves;
                 } else {
                     // Show current move and next move (two most recent when currentMove = maxMoves - 1)
                     shouldShow = moveData.moveNumber === currentMove || moveData.moveNumber === currentMove + 1;
@@ -480,8 +483,8 @@
                     this.prevMove();
                     break;
                 case 'ArrowRight':
-                    // Shift+Ctrl+Right for animation, Shift+Right for next move
-                    if (event.ctrlKey) {
+                    // Shift+Alt+Right for animation, Shift+Right for next move
+                    if (event.altKey) {
                         event.preventDefault();
                         this.animateToCurrentMove();
                     } else {
@@ -490,22 +493,21 @@
                     }
                     break;
                 case 'ArrowUp':
-                    // Shift+Ctrl+Up for faster speed
-                    if (event.ctrlKey) {
+                    // Shift+Alt+Up for faster speed
+                    if (event.altKey) {
                         event.preventDefault();
                         this.decreaseSpeed();
                     }
                     break;
                 case 'ArrowDown':
-                    // Shift+Ctrl+Down for slower speed
-                    if (event.ctrlKey) {
+                    // Shift+Alt+Down for slower speed, Shift+Down for prefix toggle
+                    if (event.altKey) {
                         event.preventDefault();
                         this.increaseSpeed();
+                    } else {
+                        event.preventDefault();
+                        this.togglePrefix();
                     }
-                    break;
-                case 'KeyP':
-                    event.preventDefault();
-                    this.togglePrefix();
                     break;
             }
         }
@@ -703,23 +705,23 @@
             this.elements = { 
                 buttons: {}, 
                 container, 
-                speedDisplay: null 
+                speedDropdown: null 
             };
             
             // Prefix toggle button
             this.elements.buttons.prefix = this.createCompactButton('🔢', () => this.togglePrefix());
-            this.elements.buttons.prefix.title = 'Toggle prefix mode - show all moves up to current (Shift+P)';
+            this.elements.buttons.prefix.title = 'Toggle prefix mode - show all moves up to current (Shift+↓)';
             this.updateCompactButtonStyle(this.elements.buttons.prefix, currentState.settings.showPrefix);
             
             // Animate button
             this.elements.buttons.animateToHere = this.createCompactButton('▶️', () => this.animateToCurrentMove());
-            this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+Ctrl+→)';
+            this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+Alt+→)';
             
             // Speed dropdown
             this.elements.speedDropdown = this.createSpeedDropdown(currentState);
             
-            // Animation button with speed display integrated
-            this.elements.buttons.animateWithSpeed = this.createAnimationButton(currentState);
+            // Animation button
+            this.elements.buttons.animate = this.createAnimationButton(currentState);
             
             // Navigation buttons
             this.elements.buttons.prev = this.createCompactButton('⏴', () => this.prevMove());
@@ -737,8 +739,8 @@
             separator1.textContent = '|';
             controlsRow.appendChild(separator1);
             
-            controlsRow.appendChild(this.elements.speedDropdown);
-            controlsRow.appendChild(this.elements.buttons.animateWithSpeed);
+            controlsRow.appendChild(this.elements.buttons.prev);
+            controlsRow.appendChild(this.elements.buttons.next);
             
             // Add separator
             const separator2 = document.createElement('span');
@@ -746,8 +748,8 @@
             separator2.textContent = '|';
             controlsRow.appendChild(separator2);
             
-            controlsRow.appendChild(this.elements.buttons.prev);
-            controlsRow.appendChild(this.elements.buttons.next);
+            controlsRow.appendChild(this.elements.speedDropdown);
+            controlsRow.appendChild(this.elements.buttons.animate);
             
             // Assemble container
             container.appendChild(header);
@@ -759,28 +761,18 @@
         createSpeedDropdown(currentState) {
             const select = document.createElement('select');
             select.className = 'form-select form-select-sm';
-            select.style.fontSize = '0.75em';
+            select.style.fontSize = '0.8em';
             select.style.padding = '0.25rem 0.5rem';
-            select.style.minWidth = '4.5em';
-            select.style.maxWidth = '5.5em';
-            select.style.border = '1px solid #6c757d';
+            select.style.minWidth = '4em';
+            select.style.maxWidth = '4.5em';
+            select.style.border = '1px solid #dee2e6';
             select.style.borderRadius = '0.375rem';
-            select.style.backgroundColor = '#f8f9fa';
-            select.style.color = '#495057';
-            select.style.boxShadow = '0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)';
-            select.style.transition = 'all 0.15s ease-in-out';
-            select.title = 'Animation speed (Shift+Ctrl+↑/↓)';
-            
-            // Add hover effect
-            select.addEventListener('mouseenter', () => {
-                select.style.borderColor = '#adb5bd';
-                select.style.boxShadow = '0 0.125rem 0.25rem rgba(0, 0, 0, 0.15)';
-            });
-            
-            select.addEventListener('mouseleave', () => {
-                select.style.borderColor = '#6c757d';
-                select.style.boxShadow = '0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)';
-            });
+            select.style.backgroundColor = '#6c757d';
+            select.style.color = '#fff';
+            select.style.appearance = 'none';
+            select.style.backgroundImage = 'none';
+            select.style.cursor = 'pointer';
+            select.title = 'Animation speed (Shift+Alt+↑/↓)';
             
             const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
             const speedLabels = ['0.1s', '0.15s', '0.2s', '0.3s', '0.5s', '0.7s', '1.0s', '1.5s', '2.0s', '3.0s', '5.0s'];
@@ -804,61 +796,16 @@
         }
 
         createAnimationButton(currentState) {
-            // Create a combined button with animation icon and speed display
+            // Create a simple animation button
             const button = document.createElement('button');
-            button.className = 'btn btn-outline-primary btn-sm';
+            button.className = 'btn btn-outline-secondary btn-sm';
             button.style.fontSize = '0.8em';
             button.style.padding = '0.25rem 0.5rem';
-            button.style.minWidth = '3.5em';
-            button.style.display = 'flex';
-            button.style.alignItems = 'center';
-            button.style.gap = '0.25rem';
-            button.title = 'Animate variation up to current move (Shift+Ctrl+→) - click speed to change';
+            button.style.minWidth = '2.2em';
+            button.title = 'Animate variation up to current move (Shift+Alt+→)';
+            button.textContent = '▶️';
             
-            // Animation icon
-            const icon = document.createElement('span');
-            icon.textContent = '▶️';
-            
-            // Speed display part
-            const speedDisplay = document.createElement('span');
-            speedDisplay.className = 'badge bg-secondary text-white';
-            speedDisplay.textContent = this.formatSpeed(currentState.animation.speed);
-            speedDisplay.style.fontSize = '0.6em';
-            speedDisplay.style.minWidth = '2em';
-            speedDisplay.style.textAlign = 'center';
-            
-            // Store reference for updates
-            this.elements.speedDisplay = speedDisplay;
-            
-            // Click on icon = animate
-            icon.addEventListener('click', (event) => {
-                event.stopPropagation();
-                this.animateToCurrentMove();
-            });
-            
-            // Click on speed = cycle speed
-            speedDisplay.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                
-                const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0];
-                const current = this.state.get().animation.speed / 1000;
-                const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
-                const nextIndex = (currentIndex + 1) % speeds.length;
-                
-                try {
-                    this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
-                    setTimeout(() => this.updateSpeedDisplay(), 10);
-                } catch (error) {
-                    console.error('Error setting animation speed:', error);
-                }
-            });
-            
-            // Whole button click = animate (default behavior)
             button.addEventListener('click', () => this.animateToCurrentMove());
-            
-            button.appendChild(icon);
-            button.appendChild(speedDisplay);
             
             return button;
         }
@@ -965,6 +912,7 @@
 
         // Action methods
         togglePrefix() {
+            this.animationEngine.stop();
             const currentState = this.state.get();
             this.state.update({
                 settings: { showPrefix: !currentState.settings.showPrefix }
@@ -997,6 +945,7 @@
         }
 
         nextMove() {
+            this.animationEngine.stop();
             const currentState = this.state.get();
             
             if (currentState.currentMove < currentState.maxMoves) {
@@ -1005,6 +954,7 @@
         }
 
         prevMove() {
+            this.animationEngine.stop();
             const currentState = this.state.get();
             
             if (currentState.currentMove > 0) {
@@ -1013,6 +963,7 @@
         }
 
         move6Forward() {
+            this.animationEngine.stop();
             const currentState = this.state.get();
             const targetMove = Math.min(currentState.currentMove + 6, currentState.maxMoves);
             
@@ -1020,6 +971,7 @@
         }
 
         move6Backward() {
+            this.animationEngine.stop();
             const currentState = this.state.get();
             const targetMove = Math.max(currentState.currentMove - 6, 0);
             
@@ -1032,6 +984,7 @@
         }
 
         goToEnd() {
+            this.animationEngine.stop();
             const currentState = this.state.get();
             
             this.state.update({ currentMove: currentState.maxMoves });
@@ -1068,28 +1021,7 @@
         }
         
         updateSpeedControls() {
-            this.updateSpeedDisplay();
             this.updateSpeedDropdown();
-        }
-        
-        updateSpeedDisplay() {
-            // Try to find speed display element directly from DOM if reference is lost
-            let speedDisplay = null;
-            
-            if (this.elements && this.elements.speedDisplay) {
-                speedDisplay = this.elements.speedDisplay;
-            } else {
-                // Fallback: search in DOM
-                speedDisplay = document.querySelector('.userscript-variation-controls .badge');
-            }
-            
-            if (speedDisplay) {
-                const currentSpeed = this.state.get().animation.speed;
-                speedDisplay.textContent = this.formatSpeed(currentSpeed);
-                console.log(`📊 Speed display updated to ${this.formatSpeed(currentSpeed)}`);
-            } else {
-                console.warn('⚠️ Speed display element not found in DOM');
-            }
         }
         
         updateSpeedDropdown() {
