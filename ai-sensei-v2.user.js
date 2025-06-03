@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Hide and show variations (Clean Architecture)
-// @version      2.0
+// @version      2.5
 // @description  Clean architecture implementation for variation visualization on AI Sensei
 // @author       Lukasz Lew
 // @match        https://*.ai-sensei.com/*
@@ -9,6 +9,9 @@
 
 (function() {
     'use strict';
+    
+    const SCRIPT_VERSION = '2.5';
+    console.log(`🎯 Variation Visualizer v${SCRIPT_VERSION} loading...`);
 
     // ===== EVENT BUS =====
     class EventBus {
@@ -613,14 +616,14 @@
 
             // Update button states
             if (changes.settings) {
-                if ('showPrefix' in changes.settings) {
+                if ('showPrefix' in changes.settings && this.elements.buttons && this.elements.buttons.prefix) {
                     this.updateCompactButtonStyle(this.elements.buttons.prefix, newState.settings.showPrefix);
                 }
             }
 
             // Update speed display
-            if (changes.animation && 'speed' in changes.animation) {
-                this.elements.speedDisplay.textContent = `${(newState.animation.speed / 1000).toFixed(1)}s`;
+            if (changes.animation && 'speed' in changes.animation && this.elements.speedDisplay) {
+                this.elements.speedDisplay.textContent = this.formatSpeed(newState.animation.speed);
             }
 
             // Update visibility
@@ -648,10 +651,17 @@
                 return;
             }
 
-            this.elements = this.createSidebarControls();
-            
-            // Insert at the end of the sidebar top card
-            sidebarTopCard.appendChild(this.elements);
+            try {
+                this.elements = this.createSidebarControls();
+                
+                // Insert at the end of the sidebar top card
+                sidebarTopCard.appendChild(this.elements);
+                
+                console.log('UI controls installed successfully');
+            } catch (error) {
+                console.error('Error installing UI controls:', error);
+                setTimeout(() => this.install(retryCount + 1), 200);
+            }
         }
 
         createSidebarControls() {
@@ -673,7 +683,11 @@
             controlsRow.className = 'd-flex align-items-center gap-2 flex-wrap';
             
             // Create button elements object for compatibility
-            this.elements = { buttons: {}, container, speedDisplay: null };
+            this.elements = { 
+                buttons: {}, 
+                container, 
+                speedDisplay: null 
+            };
             
             // Prefix toggle button
             this.elements.buttons.prefix = this.createCompactButton('🔢', () => this.togglePrefix());
@@ -684,6 +698,16 @@
             this.elements.buttons.animateToHere = this.createCompactButton('▶️', () => this.animateToCurrentMove());
             this.elements.buttons.animateToHere.title = 'Animate variation up to current move (Shift+A)';
             
+            // Speed controls
+            this.elements.buttons.slower = this.createCompactButton('🐰', () => this.decreaseSpeed());
+            this.elements.buttons.slower.title = 'Faster animation (left side)';
+            
+            this.elements.buttons.faster = this.createCompactButton('🐌', () => this.increaseSpeed());
+            this.elements.buttons.faster.title = 'Slower animation (right side)';
+            
+            // Animation button with speed display integrated
+            this.elements.buttons.animateWithSpeed = this.createAnimationButton(currentState);
+            
             // Navigation buttons
             this.elements.buttons.prev = this.createCompactButton('⏴', () => this.prevMove());
             this.elements.buttons.prev.title = 'Previous move (Shift+←)';
@@ -691,35 +715,24 @@
             this.elements.buttons.next = this.createCompactButton('⏵', () => this.nextMove());
             this.elements.buttons.next.title = 'Next move (Shift+→)';
             
-            // Speed display
-            this.elements.speedDisplay = document.createElement('span');
-            this.elements.speedDisplay.className = 'badge bg-secondary text-white';
-            this.elements.speedDisplay.textContent = `${(currentState.animation.speed / 1000).toFixed(1)}s`;
-            this.elements.speedDisplay.title = 'Animation speed - click to change';
-            this.elements.speedDisplay.style.fontSize = '0.65em';
-            this.elements.speedDisplay.style.cursor = 'pointer';
-            this.elements.speedDisplay.style.minWidth = '2.2em';
-            this.elements.speedDisplay.style.textAlign = 'center';
-            
-            // Add click handler to cycle through speeds
-            this.elements.speedDisplay.addEventListener('click', () => {
-                const speeds = [0.5, 1.0, 1.5, 2.0];
-                const current = currentState.animation.speed / 1000;
-                const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.1);
-                const nextIndex = (currentIndex + 1) % speeds.length;
-                this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
-            });
-            
             // Add controls to row
             controlsRow.appendChild(this.elements.buttons.prefix);
-            controlsRow.appendChild(this.elements.buttons.animateToHere);
-            controlsRow.appendChild(this.elements.speedDisplay);
             
             // Add separator
-            const separator = document.createElement('span');
-            separator.className = 'text-muted';
-            separator.textContent = '|';
-            controlsRow.appendChild(separator);
+            const separator1 = document.createElement('span');
+            separator1.className = 'text-muted';
+            separator1.textContent = '|';
+            controlsRow.appendChild(separator1);
+            
+            controlsRow.appendChild(this.elements.buttons.slower);
+            controlsRow.appendChild(this.elements.buttons.animateWithSpeed);
+            controlsRow.appendChild(this.elements.buttons.faster);
+            
+            // Add separator
+            const separator2 = document.createElement('span');
+            separator2.className = 'text-muted';
+            separator2.textContent = '|';
+            controlsRow.appendChild(separator2);
             
             controlsRow.appendChild(this.elements.buttons.prev);
             controlsRow.appendChild(this.elements.buttons.next);
@@ -729,6 +742,66 @@
             container.appendChild(controlsRow);
             
             return container;
+        }
+
+        createAnimationButton(currentState) {
+            // Create a combined button with animation icon and speed display
+            const button = document.createElement('button');
+            button.className = 'btn btn-outline-primary btn-sm';
+            button.style.fontSize = '0.8em';
+            button.style.padding = '0.25rem 0.5rem';
+            button.style.minWidth = '3.5em';
+            button.style.display = 'flex';
+            button.style.alignItems = 'center';
+            button.style.gap = '0.25rem';
+            button.title = 'Animate variation up to current move (Shift+A) - click speed to change';
+            
+            // Animation icon
+            const icon = document.createElement('span');
+            icon.textContent = '▶️';
+            
+            // Speed display part
+            const speedDisplay = document.createElement('span');
+            speedDisplay.className = 'badge bg-secondary text-white';
+            speedDisplay.textContent = this.formatSpeed(currentState.animation.speed);
+            speedDisplay.style.fontSize = '0.6em';
+            speedDisplay.style.minWidth = '2em';
+            speedDisplay.style.textAlign = 'center';
+            
+            // Store reference for updates
+            this.elements.speedDisplay = speedDisplay;
+            
+            // Click on icon = animate
+            icon.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.animateToCurrentMove();
+            });
+            
+            // Click on speed = cycle speed
+            speedDisplay.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+                const current = this.state.get().animation.speed / 1000;
+                const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
+                const nextIndex = (currentIndex + 1) % speeds.length;
+                
+                try {
+                    this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
+                    setTimeout(() => this.updateSpeedDisplay(), 10);
+                } catch (error) {
+                    console.error('Error setting animation speed:', error);
+                }
+            });
+            
+            // Whole button click = animate (default behavior)
+            button.addEventListener('click', () => this.animateToCurrentMove());
+            
+            button.appendChild(icon);
+            button.appendChild(speedDisplay);
+            
+            return button;
         }
 
         createVariationControls(container) {
@@ -822,6 +895,15 @@
             }
         }
 
+        formatSpeed(speedMs) {
+            const speedS = speedMs / 1000;
+            if (speedS < 1) {
+                return `${speedS.toFixed(2)}s`.replace(/\.?0+$/, 's');
+            } else {
+                return `${speedS.toFixed(1)}s`;
+            }
+        }
+
         // Action methods
         togglePrefix() {
             const currentState = this.state.get();
@@ -895,6 +977,56 @@
             this.state.update({ currentMove: currentState.maxMoves });
         }
 
+        increaseSpeed() {
+            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+            const current = this.state.get().animation.speed / 1000;
+            const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
+            
+            if (currentIndex < speeds.length - 1) {
+                const nextIndex = currentIndex + 1;
+                this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
+                console.log(`🐰 Speed increased to ${speeds[nextIndex]}s`);
+                
+                // Update display immediately
+                this.updateSpeedDisplay();
+            }
+        }
+        
+        decreaseSpeed() {
+            const speeds = [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0];
+            const current = this.state.get().animation.speed / 1000;
+            const currentIndex = speeds.findIndex(s => Math.abs(s - current) < 0.01);
+            
+            if (currentIndex > 0) {
+                const nextIndex = currentIndex - 1;
+                this.animationEngine.setSpeed(speeds[nextIndex] * 1000);
+                console.log(`🐌 Speed decreased to ${speeds[nextIndex]}s`);
+                
+                // Update display immediately
+                this.updateSpeedDisplay();
+            }
+        }
+        
+        updateSpeedDisplay() {
+            // Try to find speed display element directly from DOM if reference is lost
+            let speedDisplay = null;
+            
+            if (this.elements && this.elements.speedDisplay) {
+                speedDisplay = this.elements.speedDisplay;
+            } else {
+                // Fallback: search in DOM
+                speedDisplay = document.querySelector('.userscript-variation-controls .badge');
+            }
+            
+            if (speedDisplay) {
+                const currentSpeed = this.state.get().animation.speed;
+                speedDisplay.textContent = this.formatSpeed(currentSpeed);
+                console.log(`📊 Speed display updated to ${this.formatSpeed(currentSpeed)}`);
+            } else {
+                console.warn('⚠️ Speed display element not found in DOM');
+            }
+        }
+        
         changeSpeed(multiplier) {
             const currentState = this.state.get();
             const newSpeed = currentState.animation.speed * multiplier;
@@ -952,7 +1084,7 @@
             
             // Add reload function for development
             window.reloadVariationVisualizer = () => {
-                console.log('Reloading VariationVisualizer...');
+                console.log(`🔄 Reloading VariationVisualizer v${SCRIPT_VERSION}...`);
                 
                 // Cleanup existing instance
                 if (window.variationVisualizer) {
@@ -970,7 +1102,7 @@
                 setTimeout(() => {
                     const newVisualizer = new VariationVisualizer();
                     newVisualizer.initialize();
-                    console.log('VariationVisualizer reloaded successfully');
+                    console.log(`✅ VariationVisualizer v${SCRIPT_VERSION} reloaded successfully`);
                 }, 100);
             };
         }
@@ -982,10 +1114,16 @@
         
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
-                setTimeout(() => visualizer.initialize(), 1000);
+                setTimeout(() => {
+                    visualizer.initialize();
+                    console.log(`✅ Variation Visualizer v${SCRIPT_VERSION} initialized`);
+                }, 1000);
             });
         } else {
-            setTimeout(() => visualizer.initialize(), 1000);
+            setTimeout(() => {
+                visualizer.initialize();
+                console.log(`✅ Variation Visualizer v${SCRIPT_VERSION} initialized`);
+            }, 1000);
         }
     }
 
