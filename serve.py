@@ -24,24 +24,22 @@ class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
-    def do_GET(self):
-        # Serve the v2 script at the root
-        if self.path == '/' or self.path == '/ai-sensei-v2.user.js':
-            self.path = '/ai-sensei-v2.user.js'
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/javascript')
-            self.end_headers()
-            
-            with open('ai-sensei-v2.user.js', 'rb') as f:
-                self.wfile.write(f.read())
-        else:
-            super().do_GET()
 
     def log_message(self, format, *args):
         print(f"[{self.address_string()}] {format % args}")
 
 def main():
-    PORT = 8001
+    import sys
+    
+    # Get port from command line argument or use default
+    PORT = 8000
+    if len(sys.argv) > 1:
+        try:
+            PORT = int(sys.argv[1])
+        except ValueError:
+            print(f"❌ Invalid port: {sys.argv[1]}")
+            print("Usage: python3 serve.py [port]")
+            return
     
     # Change to the userscripts directory
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -49,8 +47,8 @@ def main():
     try:
         with socketserver.TCPServer(("", PORT), CORSHTTPRequestHandler) as httpd:
             print(f"🚀 Serving userscripts on http://localhost:{PORT}")
-            print(f"📄 v2 script available at: http://localhost:{PORT}/ai-sensei-v2.user.js")
-            print(f"🔧 Use this URL in your userscript manager for auto-updates")
+            print(f"📁 Directory contents available at: http://localhost:{PORT}/")
+            print(f"🔧 Use URLs like http://localhost:{PORT}/loader.user.js for development")
             print(f"💡 Press Ctrl+C to stop the server")
             
             try:
