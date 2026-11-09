@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.0
+// @version      2.1
 // @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
@@ -15,8 +15,8 @@
 
 // How it finds the title, most trusted first:
 //   1. CUSTOM_SELECTOR below, if you set one.
-//   2. The app's own API responses: any JSON the page fetches that contains
-//      {id: "session_…", title: "…"} is remembered (session list, rename, etc.).
+//   2. The app's own API responses: any JSON object the page fetches whose own
+//      id is "session_…" and that has a title (session list, rename, etc.).
 //   3. The sidebar link that points at the current session.
 //   4. A title remembered from earlier visits (localStorage), so the tab stays
 //      right when the sidebar is hidden, e.g. while an artifact pane is open.
@@ -99,13 +99,15 @@
 
   // ---- source 2: the app's API responses --------------------------------------
 
-  // Walks parsed JSON and records every object that looks like a session with a title.
+  // Walks parsed JSON and records every object that *is* a session with a title.
+  // Only the object's own `id` counts: things that merely belong to a session
+  // (artifacts, events: {session_id, title}) carry their own titles, not the session's.
+  const isSessionId = (v) => typeof v === 'string' && ID_RE.test(v) && v.match(ID_RE)[0] === v;
   function harvest(node, depth) {
     if (!node || typeof node !== 'object' || depth > 8) return;
     if (Array.isArray(node)) { for (const x of node) harvest(x, depth + 1); return; }
-    const id = [node.id, node.session_id, node.sessionId, node.uuid].find((v) => typeof v === 'string' && ID_RE.test(v));
-    const title = [node.title, node.name, node.session_title].find((v) => typeof v === 'string' && clean(v));
-    if (id && title) remember(id.match(ID_RE)[0], title, 'api');
+    if (isSessionId(node.id) && typeof node.title === 'string') remember(node.id, node.title, 'api');
+    else if (isSessionId(node.session_id) && typeof node.session_title === 'string') remember(node.session_id, node.session_title, 'api');
     for (const k in node) {
       const v = node[k];
       if (v && typeof v === 'object') harvest(v, depth + 1);
