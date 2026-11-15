@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.9
+// @version      2.10
 // @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with a dot for what happened while you were away
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
@@ -28,8 +28,8 @@
 // without a session ID the site's own title is left alone.
 //
 // The title starts with a dot for what happened in the session while you were
-// not looking at its tab (MARKS below): one for a new message from Claude, one
-// for a finished turn. Looking at the tab (tab visible and window focused)
+// not looking at its tab (MARKS below): Claude is working, Claude is working
+// and wrote a message, or the turn finished. Looking at the tab (tab visible and window focused)
 // removes it. The events come from the session's event socket, which delivers
 // in a hidden tab too; the page itself is redrawn only while visible.
 //
@@ -43,10 +43,11 @@
   const SUFFIX = '';
   // Optional: a CSS selector for the title element, if everything below misses it.
   const CUSTOM_SELECTOR = '';
-  // Dot per kind of event not looked at yet; the most recent event wins.
+  // Mark per kind of event not looked at yet.
   const MARKS = {
-    message: '⏳',  // Claude sent a message; the turn is still running
-    finished: '🔴', // the turn ended
+    working: '⏳',   // Claude did something (a tool call, thinking); the turn is running
+    message: '⏳💬', // Claude wrote a message; the turn is running
+    finished: '🔴',  // the turn ended
   };
 
   const ID_RE = /\bsession_[A-Za-z0-9]{8,}\b/;
@@ -120,6 +121,8 @@
     lastEvent[id] = `${kind} at ${new Date().toLocaleTimeString()}, tab ${document.visibilityState},`
       + ` window ${document.hasFocus() ? 'focused' : 'not focused'}`;
     log('event for', id, '=', lastEvent[id]);
+    // A message not looked at yet stays marked while Claude works on.
+    if (kind === 'working' && marks[id] === 'message') return;
     marks[id] = kind; // update() drops it at once if you are looking
     schedule();
   }
@@ -130,12 +133,15 @@
   // around the event is not known. Text inside an event cannot match: its
   // quotes are escaped there.
   const TURN_ENDED_RE = /"type":\s*"result"/;
-  const MESSAGE_RE = /"type":\s*"assistant"/;
+  const ASSISTANT_RE = /"type":\s*"assistant"/;
+  // A text block of an assistant event. A tool call whose input holds an object
+  // of type "text" also matches, and is then shown as a message.
+  const TEXT_RE = /"type":\s*"text"/;
 
   function eventKind(data) {
     if (typeof data !== 'string') return undefined;
     if (TURN_ENDED_RE.test(data)) return 'finished';
-    if (MESSAGE_RE.test(data)) return 'message';
+    if (ASSISTANT_RE.test(data)) return TEXT_RE.test(data) ? 'message' : 'working';
     return undefined;
   }
 

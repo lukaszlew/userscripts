@@ -51,19 +51,23 @@ async function main() {
   await page.evaluate((id) => { window.testSocket = new WebSocket(`wss://claude.ai/v1/sessions/ws/${id}/subscribe?organization_uuid=x`); }, ID);
   await page.waitForTimeout(300);
 
-  const assistant = { message: { type: 'message', content: [{ type: 'text' }] }, type: 'assistant' };
+  const toolCall = { message: { type: 'message', content: [{ type: 'tool_use' }] }, type: 'assistant' };
+  const text = { message: { type: 'message', content: [{ type: 'text' }] }, type: 'assistant' };
   const result = { type: 'result', result: { type: 'message' } };
   const toolResult = { type: 'user', message: { content: [{ type: 'tool_result', content: '{"type":"result"} and "type":"result"' }] } };
 
   // Events while looking leave no mark, also after looking away.
-  assert.strictEqual(await socketSends(assistant), 'My task');
+  assert.strictEqual(await socketSends(text), 'My task');
   assert.strictEqual(await socketSends(result), 'My task');
   assert.strictEqual(await setLooking(false), 'My task');
 
-  // Not looking: a message from Claude, then the end of the turn; other events change nothing.
+  // Not looking: Claude works, writes a message, works on, and the turn ends;
+  // other events change nothing.
   assert.strictEqual(await socketSends({ type: 'system' }), 'My task');
-  assert.strictEqual(await socketSends(assistant), '⏳ My task');
+  assert.strictEqual(await socketSends(toolCall), '⏳ My task');
   assert.strictEqual(await socketSends(toolResult), '⏳ My task');
+  assert.strictEqual(await socketSends(text), '⏳💬 My task');
+  assert.strictEqual(await socketSends(toolCall), '⏳💬 My task');
   assert.strictEqual(await socketSends(result), '🔴 My task');
   assert.strictEqual(await socketSends({ type: 'system' }), '🔴 My task');
 
@@ -71,11 +75,11 @@ async function main() {
   assert.strictEqual(await setLooking(true), 'My task');
   assert.strictEqual(await setLooking(false), 'My task');
 
-  // A turn that ends without a message seen first, and a new turn after it.
+  // A turn that ends with nothing seen first, and a new turn after it.
   assert.strictEqual(await socketSends(result), '🔴 My task');
-  assert.strictEqual(await socketSends(assistant), '⏳ My task');
+  assert.strictEqual(await socketSends(toolCall), '⏳ My task');
   const why = await page.evaluate(() => window.ccTabTitle.why());
-  assert.ok(why.includes('mark: message; last event: message at ') && why.includes('tab hidden, window not focused'), why);
+  assert.ok(why.includes('mark: working; last event: working at ') && why.includes('tab hidden, window not focused'), why);
 
   // Another session's socket does not mark this tab.
   await setLooking(true);
