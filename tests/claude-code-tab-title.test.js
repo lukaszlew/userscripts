@@ -62,8 +62,8 @@ async function main() {
 
   // Not looking: a message from Claude, then the end of the turn; other events change nothing.
   assert.strictEqual(await socketSends({ type: 'system' }), 'My task');
-  assert.strictEqual(await socketSends(assistant), '💬 My task');
-  assert.strictEqual(await socketSends(toolResult), '💬 My task');
+  assert.strictEqual(await socketSends(assistant), '⏳ My task');
+  assert.strictEqual(await socketSends(toolResult), '⏳ My task');
   assert.strictEqual(await socketSends(result), '🔴 My task');
   assert.strictEqual(await socketSends({ type: 'system' }), '🔴 My task');
 
@@ -73,7 +73,7 @@ async function main() {
 
   // A turn that ends without a message seen first, and a new turn after it.
   assert.strictEqual(await socketSends(result), '🔴 My task');
-  assert.strictEqual(await socketSends(assistant), '💬 My task');
+  assert.strictEqual(await socketSends(assistant), '⏳ My task');
   const why = await page.evaluate(() => window.ccTabTitle.why());
   assert.ok(why.includes('mark: message; last event: message at ') && why.includes('tab hidden, window not focused'), why);
 
