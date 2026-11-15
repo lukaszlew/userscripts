@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.3
+// @version      2.4
 // @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with an icon for the session's status
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
@@ -33,7 +33,8 @@
 // you look at the tab (tab visible and window focused), like an unread mark.
 // The API responses the page fetches carry no status, hence the page itself.
 //
-// Debugging: run  ccTabTitle.why()  in the page's DevTools console, or set
+// Debugging: run  ccTabTitle.why()  in the page's DevTools console
+// (ccTabTitle.statusLog() lists the status changes this tab saw), or set
 // localStorage['cc-tab-title:debug'] = '1' to log every change.
 
 (function () {
@@ -119,6 +120,9 @@
   // Sessions whose status changed to "waiting" and were not looked at since.
   const unseen = {};
 
+  // Each status change with what the tab was doing then, for statusLog().
+  const statusLog = [];
+
   const looking = () => document.visibilityState === 'visible' && document.hasFocus();
 
   function statusFromDom() {
@@ -133,7 +137,9 @@
     // The first status seen is where the session already was, not a change.
     if (status === 'working') delete unseen[id];
     else if (prev !== undefined) unseen[id] = true;
-    log('status for', id, '=', status);
+    statusLog.push(`${new Date().toLocaleTimeString()} ${id} ${prev} -> ${status}`
+      + ` (tab ${document.visibilityState}, window ${document.hasFocus() ? 'focused' : 'not focused'})`);
+    log(statusLog[statusLog.length - 1]);
   }
 
   // ---- source 2: the app's API responses --------------------------------------
@@ -331,6 +337,7 @@
   window.ccTabTitle = {
     why: () => { update(); return whyText; },
     titles: () => titles,
+    statusLog: () => statusLog.join('\n'),
     forget: () => { titles = {}; try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ } },
   };
 })();

@@ -73,6 +73,13 @@ async function main() {
   await setLooking(true);
   assert.strictEqual(await promptBox(false), '✅ My task');
 
+  // statusLog() tells whether the tab was hidden at each change.
+  const statusLog = await page.evaluate(() => window.ccTabTitle.statusLog());
+  const lines = statusLog.split('\n');
+  assert.strictEqual(lines.length, 7, statusLog);
+  assert.ok(lines[0].endsWith(`${ID} undefined -> waiting (tab hidden, window not focused)`), statusLog);
+  assert.ok(lines[6].endsWith(`${ID} working -> waiting (tab visible, window focused)`), statusLog);
+
   await browser.close();
   console.log('ok');
 }
