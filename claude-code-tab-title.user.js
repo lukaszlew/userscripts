@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.1
-// @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code
+// @version      2.2
+// @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with an icon for the session's status
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
 // @run-at       document-start
@@ -27,6 +27,11 @@
 // hash), so extra parameters such as ?artifact=… or #… don't matter. On pages
 // without a session ID the site's own title is left alone.
 //
+// The title starts with an icon for the session's status (STATUS_ICONS below),
+// read from the `status_bucket` of the same API responses. When the status
+// changes to anything but "working", UNSEEN_ICON is put in front of it until you
+// look at the tab (tab visible and window focused), like an unread mark.
+//
 // Debugging: run  ccTabTitle.why()  in the page's DevTools console, or set
 // localStorage['cc-tab-title:debug'] = '1' to log every change.
 
@@ -37,6 +42,19 @@
   const SUFFIX = '';
   // Optional: a CSS selector for the title element, if everything below misses it.
   const CUSTOM_SELECTOR = '';
+  // Icon per session status: the API's status_bucket without its
+  // SESSION_STATUS_BUCKET_ prefix, in lower case.
+  const STATUS_ICONS = {
+    working: '⏳',      // a turn is running
+    blocked: '❓',      // waiting for your answer to a prompt or question
+    review_ready: '✅', // the turn ended; waiting for your next message
+    completed: '🏁',
+    failed: '❌',
+  };
+  // A status missing from the table, so that a new one is noticed, not hidden.
+  const UNKNOWN_STATUS_ICON = '❔';
+  // In front of the status icon while a change of status is not yet looked at.
+  const UNSEEN_ICON = '🔴';
 
   const ID_RE = /\bsession_[A-Za-z0-9]{8,}\b/;
   const STORE_KEY = 'cc-tab-title:v2';
@@ -97,6 +115,35 @@
     schedule();
   }
 
+  // ---- session status: id -> status ---------------------------------------------
+
+  const statuses = {};
+  // Sessions whose status changed to a non-working one and were not looked at since.
+  const unseen = {};
+  // Every string field of a session whose name contains "status", for why().
+  const statusFields = {};
+
+  const looking = () => document.visibilityState === 'visible' && document.hasFocus();
+
+  function setStatus(id, bucket) {
+    const status = bucket.replace(/^SESSION_STATUS_BUCKET_/, '').toLowerCase();
+    const prev = statuses[id];
+    if (prev === status) return;
+    statuses[id] = status;
+    // The first status seen is where the session already was, not a change.
+    if (status === 'working') delete unseen[id];
+    else if (prev !== undefined) unseen[id] = true;
+    log('status for', id, '=', status);
+    schedule();
+  }
+
+  function harvestStatus(session) {
+    if (typeof session.status_bucket === 'string') setStatus(session.id, session.status_bucket);
+    const fields = {};
+    for (const k in session) if (/status/i.test(k) && typeof session[k] === 'string') fields[k] = session[k];
+    statusFields[session.id] = fields;
+  }
+
   // ---- source 2: the app's API responses --------------------------------------
 
   // Walks parsed JSON and records every object that *is* a session with a title.
@@ -106,8 +153,10 @@
   function harvest(node, depth) {
     if (!node || typeof node !== 'object' || depth > 8) return;
     if (Array.isArray(node)) { for (const x of node) harvest(x, depth + 1); return; }
-    if (isSessionId(node.id) && typeof node.title === 'string') remember(node.id, node.title, 'api');
-    else if (isSessionId(node.session_id) && typeof node.session_title === 'string') remember(node.session_id, node.session_title, 'api');
+    if (isSessionId(node.id)) {
+      if (typeof node.title === 'string') remember(node.id, node.title, 'api');
+      harvestStatus(node);
+    } else if (isSessionId(node.session_id) && typeof node.session_title === 'string') remember(node.session_id, node.session_title, 'api');
     for (const k in node) {
       const v = node[k];
       if (v && typeof v === 'object') harvest(v, depth + 1);
@@ -116,7 +165,7 @@
 
   function inspectText(text) {
     if (typeof text !== 'string' || text.length > 20e6) return;
-    if (!text.includes('session_') || !/"(title|name|session_title)"/.test(text)) return;
+    if (!text.includes('session_') || !/"(title|name|session_title|\w*status\w*)"/.test(text)) return;
     try { harvest(JSON.parse(text), 0); } catch { /* not plain JSON */ }
   }
 
@@ -233,7 +282,17 @@
       else whyText = `${id}: no title found yet (not in API responses, sidebar, or storage)`;
     }
 
-    if (title) wanted = title + SUFFIX;
+    if (looking()) delete unseen[id];
+    const status = statuses[id];
+    let prefix = '';
+    if (status !== undefined) {
+      prefix = (unseen[id] ? UNSEEN_ICON : '') + (STATUS_ICONS[status] || UNKNOWN_STATUS_ICON) + ' ';
+      whyText += `; status ${status}${unseen[id] ? ', not looked at yet' : ''}`;
+    } else {
+      whyText += `; no status_bucket seen for this session, its status fields: ${JSON.stringify(statusFields[id] || {})}`;
+    }
+
+    if (title) wanted = prefix + title + SUFFIX;
     // Keep the last good title while the page is mid-render; drop it only when
     // the session changes (handled in the URL watcher below).
     if (wanted && document.title !== wanted) document.title = wanted;
@@ -269,6 +328,9 @@
   }
   window.addEventListener('popstate', onUrlMaybeChanged);
   window.addEventListener('hashchange', onUrlMaybeChanged);
+  // Looking at the tab clears its unseen mark (in update()).
+  window.addEventListener('focus', schedule);
+  document.addEventListener('visibilitychange', schedule);
   setInterval(onUrlMaybeChanged, 1000); // safety net for anything the hooks miss
 
   if (document.documentElement) start();
