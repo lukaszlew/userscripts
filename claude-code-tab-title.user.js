@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.5
+// @version      2.6
 // @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with an icon for the session's status
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
@@ -27,11 +27,15 @@
 // hash), so extra parameters such as ?artifact=… or #… don't matter. On pages
 // without a session ID the site's own title is left alone.
 //
-// The title starts with an icon for the session's status (STATUS_ICONS below):
-// "working" while the prompt box shows its Stop button, "waiting" otherwise.
+// The title starts with an icon for the session's status (STATUS_ICONS below).
 // When the status changes to "waiting", UNSEEN_ICON is put in front of it until
 // you look at the tab (tab visible and window focused), like an unread mark.
-// The API responses the page fetches carry no status, hence the page itself.
+// The status has two sources, the most recent change winning:
+//   - The session's event socket: an assistant event means "working", the
+//     result event that ends a turn means "waiting". It also works in a hidden
+//     tab, where the page does not redraw.
+//   - The prompt box: "working" while it shows its Stop button, "waiting"
+//     otherwise. It gives the status when the page loads.
 //
 // Debugging: run  ccTabTitle.why()  in the page's DevTools console
 // (ccTabTitle.statusLog() lists the status changes this tab saw), or set
@@ -63,63 +67,6 @@
   const usable = (t) => t && t.length <= 300;
   const debugOn = () => { try { return localStorage.getItem('cc-tab-title:debug') === '1'; } catch { return false; } };
   const log = (...a) => { if (debugOn()) console.log('[cc-tab-title]', ...a); };
-
-  // ---- TEMPORARY diagnostic: what the page receives, and when ---------------------
-  // To find a turn-end signal that also works while the tab is hidden. Read it
-  // with  copy(ccTabTitle.netLog())  in the DevTools console. Goes once found.
-
-  const netLog = [];
-  function netNote(text) {
-    const vis = document.visibilityState;
-    const last = netLog[netLog.length - 1];
-    if (last && last.text === text && last.vis === vis) { last.n++; last.until = Date.now(); return; }
-    netLog.push({ t: Date.now(), until: Date.now(), vis, n: 1, text });
-    if (netLog.length > 800) netLog.shift();
-  }
-  const clock = (t) => new Date(t).toLocaleTimeString();
-  const netLogText = () => netLog.map((e) => `${clock(e.t)}${e.n > 1 ? `..${clock(e.until)} x${e.n}` : ''} [${e.vis}] ${e.text}`).join('\n');
-  const shortUrl = (u) => String(u).replace(location.origin, '').slice(0, 140);
-  // The event names and "type" values in a piece of a stream, not its content.
-  const typesIn = (data) => {
-    if (typeof data !== 'string') return 'binary';
-    const found = data.match(/"type":\s*"[^"]{1,40}"|^event: .{1,40}$/gm) || [];
-    return [...new Set(found)].join(' ').slice(0, 240);
-  };
-  async function watchStream(body, label) {
-    try {
-      const reader = body.getReader();
-      const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) { netNote(`${label} closed`); return; }
-        netNote(`${label} chunk ${typesIn(decoder.decode(value, { stream: true }))}`);
-      }
-    } catch (e) { netNote(`${label} failed ${e}`); }
-  }
-  try {
-    document.addEventListener('visibilitychange', () => netNote(`visibility -> ${document.visibilityState}`));
-    for (const name of ['WebSocket', 'EventSource']) {
-      const Orig = window[name];
-      if (typeof Orig !== 'function') continue;
-      window[name] = class extends Orig {
-        constructor(...args) {
-          super(...args);
-          const label = `${name} ${shortUrl(args[0])}`;
-          netNote(`${label} opened`);
-          this.addEventListener('message', (e) => netNote(`${label} message ${typesIn(e.data)}`));
-          this.addEventListener('close', () => netNote(`${label} closed`));
-          this.addEventListener('error', () => netNote(`${label} error`));
-        }
-      };
-    }
-    for (const name of ['Worker', 'SharedWorker']) {
-      const Orig = window[name];
-      if (typeof Orig !== 'function') continue;
-      window[name] = class extends Orig {
-        constructor(...args) { super(...args); netNote(`${name} ${shortUrl(args[0])} created`); }
-      };
-    }
-  } catch (e) { netNote(`diagnostic hooks failed ${e}`); }
 
   // ---- title cache: id -> {title, t, src} -------------------------------------
 
@@ -179,6 +126,8 @@
 
   // Each status change with what the tab was doing then, for statusLog().
   const statusLog = [];
+  // The prompt box's status when last read, to notice when it changes.
+  const lastPageStatus = {};
 
   const looking = () => document.visibilityState === 'visible' && document.hasFocus();
 
@@ -187,18 +136,49 @@
     return document.querySelector(STOP_SELECTOR) ? 'working' : 'waiting';
   }
 
-  function setStatus(id, status) {
+  function setStatus(id, status, source) {
     const prev = statuses[id];
     if (prev === status) return;
     statuses[id] = status;
     // The first status seen is where the session already was, not a change.
     if (status === 'working') delete unseen[id];
     else if (prev !== undefined) unseen[id] = true;
-    statusLog.push(`${new Date().toLocaleTimeString()} ${id} ${prev} -> ${status}`
+    statusLog.push(`${new Date().toLocaleTimeString()} ${id} ${prev} -> ${status} from ${source}`
       + ` (tab ${document.visibilityState}, window ${document.hasFocus() ? 'focused' : 'not focused'})`);
     log(statusLog[statusLog.length - 1]);
-    netNote(`status ${prev} -> ${status}`);
   }
+
+  // The socket each session page opens for the session's events.
+  const SOCKET_RE = /\/v1\/sessions\/ws\/(session_[A-Za-z0-9]+)\/subscribe/;
+  // An event's type is searched for in the raw message because the envelope
+  // around the event is not known. Text inside an event cannot match: its
+  // quotes are escaped there.
+  const TURN_ENDED_RE = /"type":\s*"result"/;
+  const TURN_RUNNING_RE = /"type":\s*"assistant"/;
+
+  function statusFromSocketMessage(data) {
+    if (typeof data !== 'string') return undefined;
+    if (TURN_ENDED_RE.test(data)) return 'waiting';
+    if (TURN_RUNNING_RE.test(data)) return 'working';
+    return undefined;
+  }
+
+  try {
+    const OrigWebSocket = window.WebSocket;
+    window.WebSocket = class extends OrigWebSocket {
+      constructor(...args) {
+        super(...args);
+        const m = String(args[0]).match(SOCKET_RE);
+        if (!m) return;
+        this.addEventListener('message', (e) => {
+          const status = statusFromSocketMessage(e.data);
+          if (status === undefined) return;
+          setStatus(m[1], status, 'socket');
+          schedule();
+        });
+      }
+    };
+  } catch { /* the prompt box still gives the status of a visible tab */ }
 
   // ---- source 2: the app's API responses --------------------------------------
 
@@ -233,14 +213,6 @@
         p.then((res) => {
           try {
             if (res && isJson(res.headers.get('content-type'))) res.clone().text().then(inspectText, () => {});
-          } catch { /* never break the page */ }
-          try { // TEMPORARY diagnostic
-            const input = args[0];
-            const url = shortUrl(typeof input === 'string' ? input : (input && input.url) || input);
-            const method = (args[1] && args[1].method) || (input && input.method) || 'GET';
-            const type = res.headers.get('content-type') || '';
-            netNote(`fetch ${method} ${url} -> ${res.status} ${type}`);
-            if (/event-stream/i.test(type) && res.body) watchStream(res.clone().body, `stream ${url}`);
           } catch { /* never break the page */ }
         }, () => {});
         return p;
@@ -344,8 +316,13 @@
       else whyText = `${id}: no title found yet (not in API responses, sidebar, or storage)`;
     }
 
-    const domStatus = statusFromDom();
-    if (domStatus !== undefined) setStatus(id, domStatus);
+    // Only a change of the prompt box counts: in a hidden tab it is not redrawn,
+    // and its old state must not undo what the socket reported.
+    const pageStatus = statusFromDom();
+    if (pageStatus !== undefined && pageStatus !== lastPageStatus[id]) {
+      lastPageStatus[id] = pageStatus;
+      setStatus(id, pageStatus, 'page');
+    }
     if (looking()) delete unseen[id];
     const status = statuses[id];
     let prefix = '';
@@ -404,7 +381,6 @@
     why: () => { update(); return whyText; },
     titles: () => titles,
     statusLog: () => statusLog.join('\n'),
-    netLog: netLogText,
     forget: () => { titles = {}; try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ } },
   };
 })();

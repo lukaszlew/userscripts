@@ -19,6 +19,13 @@ async function main() {
     }
     return route.fulfill({ contentType: 'text/html', body: '<title>Claude</title><body></body>' });
   });
+  // The session's event socket: the test plays the server.
+  let socket = null;
+  await page.routeWebSocket(/\/v1\/sessions\/ws\//, (ws) => { socket = ws; });
+  async function socketSends(event) {
+    socket.send(JSON.stringify(event));
+    return settledTitle();
+  }
   // The test decides whether the user is looking at the tab.
   await page.addInitScript(() => {
     window.testLooking = true;
@@ -73,12 +80,29 @@ async function main() {
   await setLooking(true);
   assert.strictEqual(await promptBox(false), '✅ My task');
 
+  // In a hidden tab the page is not redrawn (the Stop button stays), and the
+  // socket's events give the status.
+  await page.evaluate((id) => { window.testSocket = new WebSocket(`wss://claude.ai/v1/sessions/ws/${id}/subscribe?organization_uuid=x`); }, ID);
+  await page.waitForTimeout(300);
+  assert.strictEqual(await promptBox(true), '⏳ My task');
+  await setLooking(false);
+  const toolResult = { type: 'user', message: { content: [{ type: 'tool_result', content: '{"type":"result"} and "type":"result"' }] } };
+  assert.strictEqual(await socketSends(toolResult), '⏳ My task');
+  assert.strictEqual(await socketSends({ type: 'result', result: { type: 'message' } }), '🔴✅ My task');
+  assert.strictEqual(await socketSends({ type: 'system' }), '🔴✅ My task');
+  assert.strictEqual(await socketSends({ message: { type: 'message', content: [{ type: 'text' }] }, type: 'assistant' }), '⏳ My task');
+  assert.strictEqual(await socketSends({ type: 'result' }), '🔴✅ My task');
+  // Looking at it, the page redraws without the Stop button.
+  assert.strictEqual(await setLooking(true), '✅ My task');
+  assert.strictEqual(await promptBox(false), '✅ My task');
+
   // statusLog() tells whether the tab was hidden at each change.
   const statusLog = await page.evaluate(() => window.ccTabTitle.statusLog());
   const lines = statusLog.split('\n');
-  assert.strictEqual(lines.length, 7, statusLog);
-  assert.ok(lines[0].endsWith(`${ID} undefined -> waiting (tab hidden, window not focused)`), statusLog);
-  assert.ok(lines[6].endsWith(`${ID} working -> waiting (tab visible, window focused)`), statusLog);
+  assert.strictEqual(lines.length, 11, statusLog);
+  assert.ok(lines[0].endsWith(`${ID} undefined -> waiting from page (tab hidden, window not focused)`), statusLog);
+  assert.ok(lines[6].endsWith(`${ID} working -> waiting from page (tab visible, window focused)`), statusLog);
+  assert.ok(lines[8].endsWith(`${ID} working -> waiting from socket (tab hidden, window not focused)`), statusLog);
 
   await browser.close();
   console.log('ok');
