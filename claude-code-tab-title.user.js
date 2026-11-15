@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.7
+// @version      2.8
 // @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with a dot for what happened while you were away
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
@@ -45,8 +45,8 @@
   const CUSTOM_SELECTOR = '';
   // Dot per kind of event not looked at yet; the most recent event wins.
   const MARKS = {
-    message: '🔴',  // Claude sent a message; the turn is still running
-    finished: '🟢', // the turn ended
+    message: '💬',  // Claude sent a message; the turn is still running
+    finished: '🔴', // the turn ended
   };
 
   const ID_RE = /\bsession_[A-Za-z0-9]{8,}\b/;
