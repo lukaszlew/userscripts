@@ -45,64 +45,44 @@ async function main() {
     }, looking);
     return settledTitle();
   }
-  // The page renders the prompt box, with the Stop button while a turn runs.
-  async function promptBox(turnRunning) {
-    await page.evaluate((running) => {
-      document.body.innerHTML = '<button data-testid="epitaxy-cds-model-selector"></button>'
-        + (running ? '<button data-testid="code-prompt-stop"></button>' : '');
-    }, turnRunning);
-    return settledTitle();
-  }
 
   await page.goto(`https://claude.ai/code/${ID}`);
   await page.evaluate(() => fetch('/api/sessions').then((r) => r.text()));
-
-  // Before the prompt box is rendered the status is unknown: no icon.
-  assert.strictEqual(await setLooking(false), 'My task');
-  const why = await page.evaluate(() => window.ccTabTitle.why());
-  assert.ok(why.includes('status unknown'), why);
-
-  // The first status seen is no change, so no unseen mark even when not looking.
-  assert.strictEqual(await promptBox(false), '✅ My task');
-  assert.strictEqual(await promptBox(true), '⏳ My task');
-
-  // The turn ending while not looking is marked until looked at.
-  assert.strictEqual(await promptBox(false), '🔴✅ My task');
-  assert.strictEqual(await setLooking(true), '✅ My task');
-  assert.strictEqual(await setLooking(false), '✅ My task');
-
-  // A mark not looked at goes away when the session works again.
-  assert.strictEqual(await promptBox(true), '⏳ My task');
-  assert.strictEqual(await promptBox(false), '🔴✅ My task');
-  assert.strictEqual(await promptBox(true), '⏳ My task');
-
-  // The turn ending while looking is never marked.
-  await setLooking(true);
-  assert.strictEqual(await promptBox(false), '✅ My task');
-
-  // In a hidden tab the page is not redrawn (the Stop button stays), and the
-  // socket's events give the status.
   await page.evaluate((id) => { window.testSocket = new WebSocket(`wss://claude.ai/v1/sessions/ws/${id}/subscribe?organization_uuid=x`); }, ID);
   await page.waitForTimeout(300);
-  assert.strictEqual(await promptBox(true), '⏳ My task');
-  await setLooking(false);
-  const toolResult = { type: 'user', message: { content: [{ type: 'tool_result', content: '{"type":"result"} and "type":"result"' }] } };
-  assert.strictEqual(await socketSends(toolResult), '⏳ My task');
-  assert.strictEqual(await socketSends({ type: 'result', result: { type: 'message' } }), '🔴✅ My task');
-  assert.strictEqual(await socketSends({ type: 'system' }), '🔴✅ My task');
-  assert.strictEqual(await socketSends({ message: { type: 'message', content: [{ type: 'text' }] }, type: 'assistant' }), '⏳ My task');
-  assert.strictEqual(await socketSends({ type: 'result' }), '🔴✅ My task');
-  // Looking at it, the page redraws without the Stop button.
-  assert.strictEqual(await setLooking(true), '✅ My task');
-  assert.strictEqual(await promptBox(false), '✅ My task');
 
-  // statusLog() tells whether the tab was hidden at each change.
-  const statusLog = await page.evaluate(() => window.ccTabTitle.statusLog());
-  const lines = statusLog.split('\n');
-  assert.strictEqual(lines.length, 11, statusLog);
-  assert.ok(lines[0].endsWith(`${ID} undefined -> waiting from page (tab hidden, window not focused)`), statusLog);
-  assert.ok(lines[6].endsWith(`${ID} working -> waiting from page (tab visible, window focused)`), statusLog);
-  assert.ok(lines[8].endsWith(`${ID} working -> waiting from socket (tab hidden, window not focused)`), statusLog);
+  const assistant = { message: { type: 'message', content: [{ type: 'text' }] }, type: 'assistant' };
+  const result = { type: 'result', result: { type: 'message' } };
+  const toolResult = { type: 'user', message: { content: [{ type: 'tool_result', content: '{"type":"result"} and "type":"result"' }] } };
+
+  // Events while looking leave no mark, also after looking away.
+  assert.strictEqual(await socketSends(assistant), 'My task');
+  assert.strictEqual(await socketSends(result), 'My task');
+  assert.strictEqual(await setLooking(false), 'My task');
+
+  // Not looking: a message from Claude, then the end of the turn; other events change nothing.
+  assert.strictEqual(await socketSends({ type: 'system' }), 'My task');
+  assert.strictEqual(await socketSends(assistant), '🔴 My task');
+  assert.strictEqual(await socketSends(toolResult), '🔴 My task');
+  assert.strictEqual(await socketSends(result), '🟢 My task');
+  assert.strictEqual(await socketSends({ type: 'system' }), '🟢 My task');
+
+  // Looking removes the mark for good.
+  assert.strictEqual(await setLooking(true), 'My task');
+  assert.strictEqual(await setLooking(false), 'My task');
+
+  // A turn that ends without a message seen first, and a new turn after it.
+  assert.strictEqual(await socketSends(result), '🟢 My task');
+  assert.strictEqual(await socketSends(assistant), '🔴 My task');
+  const why = await page.evaluate(() => window.ccTabTitle.why());
+  assert.ok(why.includes('mark: message; last event: message at ') && why.includes('tab hidden, window not focused'), why);
+
+  // Another session's socket does not mark this tab.
+  await setLooking(true);
+  await setLooking(false);
+  await page.evaluate(() => { window.testSocket = new WebSocket('wss://claude.ai/v1/sessions/ws/session_02OTHERotherOTHER/subscribe'); });
+  await page.waitForTimeout(300);
+  assert.strictEqual(await socketSends(result), 'My task');
 
   await browser.close();
   console.log('ok');

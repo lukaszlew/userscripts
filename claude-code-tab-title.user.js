@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Claude Code: session title in tab
 // @namespace    claude-code-tab-title
-// @version      2.6
-// @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with an icon for the session's status
+// @version      2.7
+// @description  Sets the browser tab title to the current Claude Code session title on claude.ai/code, with a dot for what happened while you were away
 // @author       Lukasz Lew
 // @match        https://claude.ai/*
 // @run-at       document-start
@@ -27,18 +27,13 @@
 // hash), so extra parameters such as ?artifact=… or #… don't matter. On pages
 // without a session ID the site's own title is left alone.
 //
-// The title starts with an icon for the session's status (STATUS_ICONS below).
-// When the status changes to "waiting", UNSEEN_ICON is put in front of it until
-// you look at the tab (tab visible and window focused), like an unread mark.
-// The status has two sources, the most recent change winning:
-//   - The session's event socket: an assistant event means "working", the
-//     result event that ends a turn means "waiting". It also works in a hidden
-//     tab, where the page does not redraw.
-//   - The prompt box: "working" while it shows its Stop button, "waiting"
-//     otherwise. It gives the status when the page loads.
+// The title starts with a dot for what happened in the session while you were
+// not looking at its tab (MARKS below): one for a new message from Claude, one
+// for a finished turn. Looking at the tab (tab visible and window focused)
+// removes it. The events come from the session's event socket, which delivers
+// in a hidden tab too; the page itself is redrawn only while visible.
 //
-// Debugging: run  ccTabTitle.why()  in the page's DevTools console
-// (ccTabTitle.statusLog() lists the status changes this tab saw), or set
+// Debugging: run  ccTabTitle.why()  in the page's DevTools console, or set
 // localStorage['cc-tab-title:debug'] = '1' to log every change.
 
 (function () {
@@ -48,16 +43,11 @@
   const SUFFIX = '';
   // Optional: a CSS selector for the title element, if everything below misses it.
   const CUSTOM_SELECTOR = '';
-  const STATUS_ICONS = {
-    working: '⏳', // a turn is running
-    waiting: '✅', // no turn is running: the session waits for your message
+  // Dot per kind of event not looked at yet; the most recent event wins.
+  const MARKS = {
+    message: '🔴',  // Claude sent a message; the turn is still running
+    finished: '🟢', // the turn ended
   };
-  // Present whenever the prompt box is rendered; without it the status is unknown.
-  const PROMPT_BOX_SELECTOR = '[data-testid="epitaxy-cds-model-selector"]';
-  // Present in the prompt box only while a turn is running.
-  const STOP_SELECTOR = '[data-testid="code-prompt-stop"]';
-  // In front of the status icon while a change of status is not yet looked at.
-  const UNSEEN_ICON = '🔴';
 
   const ID_RE = /\bsession_[A-Za-z0-9]{8,}\b/;
   const STORE_KEY = 'cc-tab-title:v2';
@@ -118,34 +108,20 @@
     schedule();
   }
 
-  // ---- session status: id -> status ---------------------------------------------
+  // ---- marks: id -> the last event not looked at yet ------------------------------
 
-  const statuses = {};
-  // Sessions whose status changed to "waiting" and were not looked at since.
-  const unseen = {};
-
-  // Each status change with what the tab was doing then, for statusLog().
-  const statusLog = [];
-  // The prompt box's status when last read, to notice when it changes.
-  const lastPageStatus = {};
+  const marks = {};
+  // The last event of each session with what the tab was doing then, for why().
+  const lastEvent = {};
 
   const looking = () => document.visibilityState === 'visible' && document.hasFocus();
 
-  function statusFromDom() {
-    if (!document.querySelector(PROMPT_BOX_SELECTOR)) return undefined;
-    return document.querySelector(STOP_SELECTOR) ? 'working' : 'waiting';
-  }
-
-  function setStatus(id, status, source) {
-    const prev = statuses[id];
-    if (prev === status) return;
-    statuses[id] = status;
-    // The first status seen is where the session already was, not a change.
-    if (status === 'working') delete unseen[id];
-    else if (prev !== undefined) unseen[id] = true;
-    statusLog.push(`${new Date().toLocaleTimeString()} ${id} ${prev} -> ${status} from ${source}`
-      + ` (tab ${document.visibilityState}, window ${document.hasFocus() ? 'focused' : 'not focused'})`);
-    log(statusLog[statusLog.length - 1]);
+  function onSessionEvent(id, kind) {
+    lastEvent[id] = `${kind} at ${new Date().toLocaleTimeString()}, tab ${document.visibilityState},`
+      + ` window ${document.hasFocus() ? 'focused' : 'not focused'}`;
+    log('event for', id, '=', lastEvent[id]);
+    marks[id] = kind; // update() drops it at once if you are looking
+    schedule();
   }
 
   // The socket each session page opens for the session's events.
@@ -154,12 +130,12 @@
   // around the event is not known. Text inside an event cannot match: its
   // quotes are escaped there.
   const TURN_ENDED_RE = /"type":\s*"result"/;
-  const TURN_RUNNING_RE = /"type":\s*"assistant"/;
+  const MESSAGE_RE = /"type":\s*"assistant"/;
 
-  function statusFromSocketMessage(data) {
+  function eventKind(data) {
     if (typeof data !== 'string') return undefined;
-    if (TURN_ENDED_RE.test(data)) return 'waiting';
-    if (TURN_RUNNING_RE.test(data)) return 'working';
+    if (TURN_ENDED_RE.test(data)) return 'finished';
+    if (MESSAGE_RE.test(data)) return 'message';
     return undefined;
   }
 
@@ -171,14 +147,12 @@
         const m = String(args[0]).match(SOCKET_RE);
         if (!m) return;
         this.addEventListener('message', (e) => {
-          const status = statusFromSocketMessage(e.data);
-          if (status === undefined) return;
-          setStatus(m[1], status, 'socket');
-          schedule();
+          const kind = eventKind(e.data);
+          if (kind !== undefined) onSessionEvent(m[1], kind);
         });
       }
     };
-  } catch { /* the prompt box still gives the status of a visible tab */ }
+  } catch (e) { log('no marks: could not wrap WebSocket', e); }
 
   // ---- source 2: the app's API responses --------------------------------------
 
@@ -316,22 +290,9 @@
       else whyText = `${id}: no title found yet (not in API responses, sidebar, or storage)`;
     }
 
-    // Only a change of the prompt box counts: in a hidden tab it is not redrawn,
-    // and its old state must not undo what the socket reported.
-    const pageStatus = statusFromDom();
-    if (pageStatus !== undefined && pageStatus !== lastPageStatus[id]) {
-      lastPageStatus[id] = pageStatus;
-      setStatus(id, pageStatus, 'page');
-    }
-    if (looking()) delete unseen[id];
-    const status = statuses[id];
-    let prefix = '';
-    if (status !== undefined) {
-      prefix = (unseen[id] ? UNSEEN_ICON : '') + STATUS_ICONS[status] + ' ';
-      whyText += `; status ${status}${unseen[id] ? ', not looked at yet' : ''}`;
-    } else {
-      whyText += `; status unknown: no prompt box (${PROMPT_BOX_SELECTOR}) on the page`;
-    }
+    if (looking()) delete marks[id];
+    const prefix = marks[id] ? MARKS[marks[id]] + ' ' : '';
+    whyText += `; mark: ${marks[id] || 'none'}; last event: ${lastEvent[id] || 'none seen'}`;
 
     if (title) wanted = prefix + title + SUFFIX;
     // Keep the last good title while the page is mid-render; drop it only when
@@ -369,7 +330,7 @@
   }
   window.addEventListener('popstate', onUrlMaybeChanged);
   window.addEventListener('hashchange', onUrlMaybeChanged);
-  // Looking at the tab clears its unseen mark (in update()).
+  // Looking at the tab removes its mark (in update()).
   window.addEventListener('focus', schedule);
   document.addEventListener('visibilitychange', schedule);
   setInterval(onUrlMaybeChanged, 1000); // safety net for anything the hooks miss
@@ -380,7 +341,6 @@
   window.ccTabTitle = {
     why: () => { update(); return whyText; },
     titles: () => titles,
-    statusLog: () => statusLog.join('\n'),
     forget: () => { titles = {}; try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ } },
   };
 })();
